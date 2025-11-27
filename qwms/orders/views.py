@@ -5,6 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.core.exceptions import ValidationError
+from django.db.models import F
 
 from orders.models import Document, DocumentLine, Reservation
 from orders.serializers import (
@@ -165,6 +166,64 @@ class DocumentViewSet(viewsets.ModelViewSet):
             {
                 "status": "canceled",
                 "document": DocumentSerializer(doc).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["get"])
+    def picking_list(self, request, pk=None):
+        """
+        Return a picking list for this Document.
+
+        GET /api/documents/{id}/picking_list/
+
+        Response structure:
+        {
+            "document": { ... },
+            "picking_list": [
+                {"bin": "A-01", "items": [ {reservation entries...} ] },
+                ...
+            ]
+        }
+        """
+        doc = self.get_object()
+
+        # Reservations for this document that still have remaining qty to pick
+        reservations = (
+            Reservation.objects
+            .filter(line__document=doc)
+            .filter(qty__gt=F('qty_picked'))
+            .select_related('quant', 'line__item', 'quant__bin', 'quant__lot')
+            .order_by('quant__bin__location_code')
+        )
+
+        # Group reservations by bin location for a picker-friendly list
+        grouped = {}
+        for r in reservations:
+            bin_code = getattr(r.quant.bin, 'location_code', str(r.quant.bin))
+            entry = {
+                'reservation_id': r.id,
+                'quant_id': r.quant.id,
+                'item_sku': r.line.item.sku,
+                'item_name': r.line.item.name,
+                'lot_code': r.quant.lot.lot_code if r.quant.lot else None,
+                'qty': r.qty,
+                'qty_picked': r.qty_picked,
+                'qty_remaining': r.qty_remaining,
+                'bin_location': bin_code,
+            }
+
+            grouped.setdefault(bin_code, []).append(entry)
+
+        picking_list = [
+            {'bin': bin_code, 'items': items}
+            for bin_code, items in grouped.items()
+        ]
+
+        return Response(
+            {
+                'document': DocumentSerializer(doc).data,
+                'picking_list': picking_list,
             },
             status=status.HTTP_200_OK,
         )
