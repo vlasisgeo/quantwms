@@ -732,6 +732,40 @@ curl http://127.0.0.1:8000/api/companies/ \
 
 ---
 
+## Testing
+
+### Run Tests
+
+```powershell
+# Run all tests
+pytest qwms/tests/test_wms.py -v
+
+# Run specific test class
+pytest qwms/tests/test_wms.py::TestMultiTenantAllocation -v
+
+# Run with coverage report
+pytest qwms/tests/test_wms.py --cov=qwms --cov-report=term-missing
+```
+
+### Test Coverage
+
+The test suite includes 10 comprehensive tests covering:
+
+- **Multi-tenant isolation** (2 tests): Ensure orders only allocate stock from the correct owner company
+- **Concurrency safety** (2 tests): Validate SELECT FOR UPDATE prevents double-allocation and double-deduction
+- **End-to-end workflows** (3 tests): Test complete order lifecycle (receive → allocate → pick → complete)
+- **Edge cases** (3 tests): Handle zero quantities, insufficient stock, and duplicate reservations
+
+**Current Coverage:**
+- `test_wms.py`: 97% coverage
+- `orders/models.py`: 86% coverage
+- `core/models.py`: 91% coverage
+- **Total:** 52% (business logic is well-tested; API views are Phase 2)
+
+For detailed test report, see [TEST_REPORT.md](TEST_REPORT.md).
+
+---
+
 ## Next Steps
 
 1. **Write integration tests** for concurrency scenarios

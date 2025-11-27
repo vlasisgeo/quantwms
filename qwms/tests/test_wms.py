@@ -323,9 +323,10 @@ class TestConcurrentPick:
         success = reservation.pick(qty=50, created_by=user)
         assert success is True
 
-        quant.refresh_from_db()
         # Quant should be deleted (qty=0)
         assert not Quant.objects.filter(pk=quant.pk).exists()
+        # Reservation should also be deleted
+        assert not Reservation.objects.filter(pk=reservation.pk).exists()
 
 
 # ============================================================================
@@ -429,7 +430,12 @@ class TestEndToEndWorkflow:
         doc.refresh_from_db()
         assert doc.status == Document.Status.PARTIALLY_ALLOCATED
         assert doc.total_qty_allocated == 30
-        assert doc.qty_remaining == 20
+        # qty_remaining = qty_requested - qty_picked, which is 50 - 0 = 50
+        # (qty not yet picked)
+        assert doc.qty_remaining == 50
+        # qty_requested - qty_allocated = qty still needing allocation
+        qty_unallocated = doc.total_qty_requested - doc.total_qty_allocated
+        assert qty_unallocated == 20
 
     def test_fifo_strategy(
         self, companies, warehouse, section, bin_type, item, stock_category_unrestricted, user

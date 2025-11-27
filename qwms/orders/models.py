@@ -371,9 +371,16 @@ class Reservation(TimeStampedModel):
             reference=f"pick:{self.line.document.doc_number}",
         )
 
-        # Delete quant if qty is 0
+        # Delete reservation and quant if fully picked
         if locked_quant.qty == 0:
+            # Delete this reservation first (before Quant due to FK constraint)
+            self.delete()
+            # Now delete the quant (no more FK references)
             locked_quant.delete()
+        else:
+            # Partial pick - keep reservation if still has qty_remaining
+            if self.qty_remaining == 0:
+                self.delete()
 
         # Update document status
         self.line.document._update_status()
