@@ -61,6 +61,11 @@ class Item(TimeStampedModel):
     # Handling flags
     fragile = models.BooleanField(default=False)
     hazardous = models.BooleanField(default=False)
+    # Does this item require refrigerated storage?
+    requires_refrigeration = models.BooleanField(
+        default=False,
+        help_text="True if this item must be stored in a refrigerated section/bin",
+    )
     
     active = models.BooleanField(default=True)
 
@@ -159,6 +164,12 @@ class Quant(TimeStampedModel):
     
     # Reserved qty (reserved for orders but not yet picked)
     qty_reserved = models.PositiveIntegerField(default=0)
+    # If True, this Quant stores a refrigerated item temporarily in a
+    # non-refrigerated section until it can be moved to a refrigerated section.
+    is_temp_unrefrigerated = models.BooleanField(
+        default=False,
+        help_text="Temporarily stored refrigerated item in non-refrigerated section",
+    )
 
     class Meta:
         # Enforce uniqueness: one quant per (item, bin, lot, category, owner)
@@ -179,6 +190,32 @@ class Quant(TimeStampedModel):
     def qty_available(self) -> int:
         """Available qty = total qty - reserved qty."""
         return max(0, self.qty - self.qty_reserved)
+
+    def save(self, *args, **kwargs):
+        """
+        Allow refrigerated items to be temporarily stored in non-refrigerated
+        sections. When an Item requires refrigeration and the Bin's Section is
+        not refrigerated, mark this Quant as `is_temp_unrefrigerated=True` so
+        callers can detect and handle it (e.g., schedule a move).
+        """
+        # If related objects are not available, defer behavior to super().save
+        if getattr(self, 'item', None) and getattr(self, 'bin', None):
+            try:
+                needs_refrig = bool(getattr(self.item, 'requires_refrigeration', False))
+                is_refrig_section = bool(getattr(self.bin.section, 'is_refrigerated', False))
+            except Exception:
+                return super().save(*args, **kwargs)
+
+            # If item requires refrigeration but bin is not refrigerated,
+            # mark the quant as temporarily unrefrigerated so it can be
+            # tracked and moved later. Otherwise ensure the flag is False.
+            if needs_refrig and not is_refrig_section:
+                self.is_temp_unrefrigerated = True
+            else:
+                # Clear the temporary flag when stored in proper section
+                self.is_temp_unrefrigerated = False
+
+        return super().save(*args, **kwargs)
 
     @transaction.atomic
     def receive_qty(self, qty: int, created_by: User = None) -> "Quant":

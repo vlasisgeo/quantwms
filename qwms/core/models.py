@@ -95,6 +95,10 @@ class Section(TimeStampedModel):
     name = models.CharField(max_length=255, blank=True)
     description = models.TextField(blank=True)
     active = models.BooleanField(default=True)
+    is_refrigerated = models.BooleanField(
+        default=False,
+        help_text="If true, this Section is temperature-controlled (refrigerated) and can store perishable items.",
+    )
 
     class Meta:
         unique_together = (("warehouse", "code"),)
