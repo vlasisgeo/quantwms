@@ -1,6 +1,7 @@
 """Serializers for core app (Company, Warehouse, Section, Bin, WarehouseUser)."""
 
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from core.models import Company, Warehouse, Section, BinType, Bin, WarehouseUser
 
 
@@ -101,6 +102,7 @@ class BinSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["code", "created_at", "updated_at"]
 
+    @extend_schema_field(serializers.DictField)
     def get_label(self, obj):
         """Return the bin label."""
         return obj.label

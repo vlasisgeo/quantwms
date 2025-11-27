@@ -156,5 +156,8 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': 'Warehouse Management System API with Quants, Orders, and Picking',
     'VERSION': '1.0.0',
     'SERVE_PERMISSIONS': ['rest_framework.permissions.AllowAny'],
+    'SCHEMA_COERCE_DECIMAL_TO_STRING': False,
+    'COERCE_DECIMAL_TO_STRING': False,
 }
+
 

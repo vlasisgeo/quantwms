@@ -238,10 +238,13 @@ class DocumentLine(TimeStampedModel):
         warehouse = self.document.warehouse
 
         # Get candidate quants (available, not expired, unrestricted or specified category)
+        # IMPORTANT: restrict to quants owned by the document owner to prevent
+        # allocating another company's stock.
         quants = Quant.objects.filter(
             item=self.item,
             bin__warehouse=warehouse,
             stock_category=StockCategory.UNRESTRICTED,
+            owner=self.document.owner,
         ).select_for_update()
 
         # Sort by strategy
