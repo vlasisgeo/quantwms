@@ -208,7 +208,24 @@ class WarehouseUser(TimeStampedModel):
 
 def get_user_companies(user: User):
     """Return active companies a user has access to."""
-    return Company.objects.filter(warehouse__warehouseuser__user=user, active=True).distinct()
+    # Companies explicitly assigned to the user via WarehouseUser.company
+    explicit_company_qs = Company.objects.none()
+    try:
+        explicit_company_qs = Company.objects.filter(
+            id__in=WarehouseUser.objects.filter(user=user, company__isnull=False, active=True).values_list(
+                "company_id", flat=True
+            )
+        )
+    except Exception:
+        # If WarehouseUser isn't usable for some reason, fall back to implicit lookup
+        explicit_company_qs = Company.objects.none()
+
+    # Companies inferred from warehouses the user is bound to
+    via_warehouses_qs = Company.objects.filter(warehouse__warehouseuser__user=user, active=True)
+
+    # Union semantics: include both explicit company bindings and companies
+    # derived from warehouse bindings
+    return (explicit_company_qs | via_warehouses_qs).distinct()
 
 
 def get_user_warehouses(user: User):

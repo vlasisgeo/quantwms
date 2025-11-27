@@ -71,6 +71,44 @@ class QuantViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["item", "bin", "owner", "stock_category"]
 
+    def get_queryset(self):
+        """Return quants allowed for the current user using intersection semantics when both
+        explicit company bindings and warehouse bindings exist.
+
+        Rules:
+        - staff: all quants
+        - only warehouses: all quants in those warehouses
+        - only companies: all quants owned by those companies
+        - both warehouses and explicit companies: quants where owner is in companies AND bin.warehouse is in warehouses
+        """
+        user = self.request.user
+        if user.is_staff:
+            return Quant.objects.all()
+
+        # Lazy imports to avoid circular import at module load time
+        from core.models import WarehouseUser, get_user_warehouses
+        from core.models import Company
+
+        # Warehouses the user is explicitly bound to
+        warehouses = get_user_warehouses(user)
+
+        # Explicit companies assigned via WarehouseUser.company (don't infer from warehouses)
+        explicit_company_ids = WarehouseUser.objects.filter(
+            user=user, company__isnull=False, active=True
+        ).values_list("company_id", flat=True)
+        companies = Company.objects.filter(id__in=explicit_company_ids) if explicit_company_ids else Company.objects.none()
+
+        # Decide result based on which sets are present
+        if warehouses.exists() and companies.exists():
+            return Quant.objects.filter(bin__warehouse__in=warehouses, owner__in=companies).distinct()
+        if warehouses.exists():
+            return Quant.objects.filter(bin__warehouse__in=warehouses).distinct()
+        if companies.exists():
+            return Quant.objects.filter(owner__in=companies).distinct()
+
+        # If the user has no bindings, return empty set
+        return Quant.objects.none()
+
     @action(detail=False, methods=["post"])
     def receive_goods(self, request):
         """
