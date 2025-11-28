@@ -396,6 +396,65 @@ class Quant(TimeStampedModel):
 
         return True
 
+    @transaction.atomic
+    def transfer_to_bin(self, target_bin: "Bin", qty: int, created_by: User = None) -> bool:
+        """
+        Transfer quantity from this quant to a target bin.
+        Automatically creates or merges with the target quant (same item, lot, category, owner).
+        
+        Args:
+            target_bin: destination Bin
+            qty: quantity to move
+            created_by: user performing the transfer
+            
+        Returns:
+            True if transfer succeeded, False if insufficient qty
+        """
+        if qty <= 0:
+            raise ValidationError("Transfer qty must be > 0")
+
+        # Lock source quant
+        source = Quant.objects.select_for_update().get(pk=self.pk)
+
+        if source.qty_available < qty:
+            return False
+
+        # Get or create target quant (same item, lot, stock_category, owner, but different bin)
+        target_quant, created = Quant.objects.get_or_create(
+            item=source.item,
+            bin=target_bin,
+            lot=source.lot,
+            stock_category=source.stock_category,
+            owner=source.owner,
+            defaults={"qty": 0},
+        )
+
+        # Deduct from source
+        source.qty -= qty
+        source.save()
+
+        # Add to target
+        target_quant.qty += qty
+        target_quant.save()
+
+        # Delete source if qty is now 0
+        if source.qty == 0:
+            source.delete()
+
+        # Log the movement
+        Movement.objects.create(
+            from_quant=self,
+            to_quant=target_quant,
+            item=source.item,
+            qty=qty,
+            movement_type=Movement.TYPE_TRANSFER,
+            warehouse=target_bin.warehouse,
+            created_by=created_by,
+            reference="transfer_to_bin",
+        )
+
+        return True
+
 
 class Movement(models.Model):
     """Immutable audit log of all inventory transactions.

@@ -75,3 +75,4 @@ qwms/qwms/__pycache__/urls.cpython-312.pyc
 qwms/qwms/__pycache__/wsgi.cpython-312.pyc
 qwms/core/migrations/__pycache__/0002_section_is_refrigerated.cpython-312.pyc
 qwms/inventory/migrations/__pycache__/0002_item_requires_refrigeration_and_more.cpython-312.pyc
+qwms/core/__pycache__/views.cpython-313.pyc

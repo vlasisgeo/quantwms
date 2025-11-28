@@ -4,6 +4,7 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
+from django.db import models
 
 from core.models import Company, Warehouse, Section, BinType, Bin, WarehouseUser
 from core.serializers import (
@@ -91,4 +92,53 @@ class WarehouseUserViewSet(viewsets.ModelViewSet):
     serializer_class = WarehouseUserSerializer
     permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
     filterset_fields = ["user", "warehouse", "company", "active"]
+
+    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
+    def my_access(self, request):
+        """
+        GET /api/warehouse-users/my_access/
+        
+        Return the current user's effective access: companies, warehouses, and quants they can see.
+        """
+        from core.models import get_user_companies, get_user_warehouses
+        from inventory.models import Quant
+
+        user = request.user
+        
+        # Get user's effective access
+        companies = get_user_companies(user)
+        warehouses = get_user_warehouses(user)
+        
+        # Get quants visible to the user using the same logic as QuantViewSet
+        if user.is_staff:
+            visible_quants = Quant.objects.all()
+        else:
+            # Intersection semantics: if both companies and warehouses exist, use intersection
+            if companies.exists() and warehouses.exists():
+                visible_quants = Quant.objects.filter(bin__warehouse__in=warehouses, owner__in=companies)
+            elif warehouses.exists():
+                visible_quants = Quant.objects.filter(bin__warehouse__in=warehouses)
+            elif companies.exists():
+                visible_quants = Quant.objects.filter(owner__in=companies)
+            else:
+                visible_quants = Quant.objects.none()
+        
+        visible_quants = visible_quants.distinct()
+        
+        return Response(
+            {
+                "user": user.username,
+                "is_staff": user.is_staff,
+                "companies": [
+                    {"id": c.id, "code": c.code, "name": c.name}
+                    for c in companies
+                ],
+                "warehouses": [
+                    {"id": w.id, "code": w.code, "name": w.name}
+                    for w in warehouses
+                ],
+                "visible_quants_count": visible_quants.count(),
+            },
+            status=status.HTTP_200_OK,
+        )
 

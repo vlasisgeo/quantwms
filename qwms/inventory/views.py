@@ -287,9 +287,111 @@ class QuantViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=False, methods=["post"])
+    def transfer_to_bin(self, request):
+        """Transfer quantity from a quant to a target bin (creates target quant if needed).
+        POST /api/quants/transfer_to_bin/
+        {
+            "from_quant_id": 1,
+            "target_bin_id": 5,
+            "qty": 50,
+            "notes": "Putaway to shelf A1"
+        }
+        """
+        from core.models import Bin
+
+        from_quant_id = request.data.get("from_quant_id")
+        target_bin_id = request.data.get("target_bin_id")
+        qty = request.data.get("qty")
+
+        if not from_quant_id or not target_bin_id or not qty:
+            return Response(
+                {"error": "from_quant_id, target_bin_id, and qty are required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            qty = int(qty)
+            if qty <= 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            return Response(
+                {"error": "qty must be a positive integer"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from_quant = Quant.objects.get(id=from_quant_id)
+        except Quant.DoesNotExist:
+            return Response(
+                {"error": "Source quant not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            target_bin = Bin.objects.get(id=target_bin_id)
+        except Bin.DoesNotExist:
+            return Response(
+                {"error": "Target bin not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            success = from_quant.transfer_to_bin(
+                target_bin=target_bin,
+                qty=qty,
+                created_by=request.user,
+            )
+        except ValidationError as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not success:
+            return Response(
+                {"error": "Transfer failed: insufficient available quantity"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Fetch updated quant(s) for response
+        try:
+            updated_from_quant = Quant.objects.get(id=from_quant_id)
+        except Quant.DoesNotExist:
+            updated_from_quant = None
+
+        # Get or find the target quant that was just updated
+        target_quant = Quant.objects.filter(
+            item=from_quant.item,
+            bin=target_bin,
+            lot=from_quant.lot,
+            stock_category=from_quant.stock_category,
+            owner=from_quant.owner,
+        ).first()
+
+        return Response(
+            {
+                "status": "success",
+                "from_quant": QuantSerializer(updated_from_quant).data if updated_from_quant else None,
+                "to_quant": QuantSerializer(target_quant).data if target_quant else None,
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
 class MovementViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for Movement (audit log, read-only)."""
+
+    queryset = Movement.objects.all()
+    serializer_class = MovementSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ["item", "warehouse", "movement_type"]
+    ordering = ["-created_at"]
+
+
+def get_inventory_by_bin_view(bin):
+    """Helper function for bin inventory endpoint."""
+    return get_inventory_by_bin(bin)
 
     queryset = Movement.objects.all()
     serializer_class = MovementSerializer
