@@ -16,7 +16,7 @@ django.setup()
 
 from django.contrib.auth import get_user_model
 from django.db.models import Count
-from core.models import Company, Warehouse, WarehouseUser, get_user_companies, get_user_warehouses
+from core.models import Company, Warehouse, get_user_companies, get_user_warehouses
 from inventory.models import Quant
 
 User = get_user_model()

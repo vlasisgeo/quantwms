@@ -2,7 +2,11 @@
 
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
-from core.models import Company, Warehouse, Section, BinType, Bin, WarehouseUser
+from django.conf import settings
+from core.models import Company, Warehouse, Section, BinType, Bin
+
+# When the legacy WarehouseUser compatibility layer is disabled we expose a
+# read-only accounts-backed representation via `UserAccessEntrySerializer`.
 
 
 class CompanySerializer(serializers.ModelSerializer):
@@ -108,26 +112,22 @@ class BinSerializer(serializers.ModelSerializer):
         return obj.label
 
 
-class WarehouseUserSerializer(serializers.ModelSerializer):
-    """Serialize WarehouseUser model."""
+class UserAccessEntrySerializer(serializers.Serializer):
+    """Read-only serializer that represents a user's access entry.
 
-    user_username = serializers.CharField(source="user.username", read_only=True)
-    company_name = serializers.CharField(source="company.name", read_only=True)
-    warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
+    This is used by the admin access endpoint. Fields mirror the former
+    `WarehouseUser` shape for backwards compatibility but are sourced from
+    `accounts` models (Membership, WarehouseAssignment).
+    """
 
-    class Meta:
-        model = WarehouseUser
-        fields = [
-            "id",
-            "user",
-            "user_username",
-            "company",
-            "company_name",
-            "warehouse",
-            "warehouse_name",
-            "role",
-            "active",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["created_at", "updated_at"]
+    id = serializers.IntegerField(read_only=True)
+    user = serializers.IntegerField(read_only=True)
+    user_username = serializers.CharField(read_only=True)
+    company = serializers.IntegerField(allow_null=True, read_only=True)
+    company_name = serializers.CharField(allow_null=True, read_only=True)
+    warehouse = serializers.IntegerField(allow_null=True, read_only=True)
+    warehouse_name = serializers.CharField(allow_null=True, read_only=True)
+    role = serializers.IntegerField(read_only=True)
+    active = serializers.BooleanField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)

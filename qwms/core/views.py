@@ -6,15 +6,19 @@ from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.db import models
 
-from core.models import Company, Warehouse, Section, BinType, Bin, WarehouseUser
+from core.models import Company, Warehouse, Section, BinType, Bin
 from core.serializers import (
     CompanySerializer,
     WarehouseSerializer,
     SectionSerializer,
     BinTypeSerializer,
     BinSerializer,
-    WarehouseUserSerializer,
 )
+
+from django.conf import settings
+
+# Import serializers conditionally
+from core.serializers import UserAccessEntrySerializer as _UserAccessEntrySerializer
 
 
 class CompanyViewSet(viewsets.ModelViewSet):
@@ -29,8 +33,10 @@ class CompanyViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.is_staff:
             return Company.objects.all()
-        # Non-staff users only see companies they have access to
-        return Company.objects.filter(warehouse__warehouseuser__user=user).distinct()
+        # Non-staff users only see companies they have access to (via accounts helpers)
+        from core.models import get_user_companies
+
+        return get_user_companies(user)
 
 
 class WarehouseViewSet(viewsets.ModelViewSet):
@@ -46,7 +52,9 @@ class WarehouseViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.is_staff:
             return Warehouse.objects.all()
-        return Warehouse.objects.filter(warehouseuser__user=user).distinct()
+        from core.models import get_user_warehouses
+
+        return get_user_warehouses(user).distinct()
 
 
 class SectionViewSet(viewsets.ModelViewSet):
@@ -86,59 +94,117 @@ class BinViewSet(viewsets.ModelViewSet):
 
 
 class WarehouseUserViewSet(viewsets.ModelViewSet):
-    """ViewSet for WarehouseUser (user permissions)."""
+    """Admin API for user access entries.
 
-    queryset = WarehouseUser.objects.all()
-    serializer_class = WarehouseUserSerializer
+    Behavior depends on `settings.USE_LEGACY_WAREHOUSEUSER`:
+    - True: original behavior backed by `core.models.WarehouseUser` (read/write).
+    - False: read-only proxy backed by `accounts` models (no modifications allowed).
+    """
+
     permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
-    filterset_fields = ["user", "warehouse", "company", "active"]
+    # Always operate as a read-only accounts-backed proxy now that legacy model
+    # has been removed.
+    queryset = Company.objects.none()
+    serializer_class = _UserAccessEntrySerializer
+    # This is a read-only proxy (not model-backed) so we must not declare
+    # `filterset_fields` which would cause django-filter to attempt to build
+    # a model FilterSet for non-model fields during schema generation.
 
-    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
-    def my_access(self, request):
-        """
-        GET /api/warehouse-users/my_access/
-        
-        Return the current user's effective access: companies, warehouses, and quants they can see.
-        """
-        from core.models import get_user_companies, get_user_warehouses
-        from inventory.models import Quant
+    def list(self, request, *args, **kwargs):
+        """Return a combined list of access entries from `accounts`.
 
-        user = request.user
-        
-        # Get user's effective access
-        companies = get_user_companies(user)
-        warehouses = get_user_warehouses(user)
-        
-        # Get quants visible to the user using the same logic as QuantViewSet
-        if user.is_staff:
-            visible_quants = Quant.objects.all()
-        else:
-            # Intersection semantics: if both companies and warehouses exist, use intersection
-            if companies.exists() and warehouses.exists():
-                visible_quants = Quant.objects.filter(bin__warehouse__in=warehouses, owner__in=companies)
-            elif warehouses.exists():
-                visible_quants = Quant.objects.filter(bin__warehouse__in=warehouses)
-            elif companies.exists():
-                visible_quants = Quant.objects.filter(owner__in=companies)
-            else:
-                visible_quants = Quant.objects.none()
-        
-        visible_quants = visible_quants.distinct()
-        
-        return Response(
-            {
-                "user": user.username,
-                "is_staff": user.is_staff,
-                "companies": [
-                    {"id": c.id, "code": c.code, "name": c.name}
-                    for c in companies
-                ],
-                "warehouses": [
-                    {"id": w.id, "code": w.code, "name": w.name}
-                    for w in warehouses
-                ],
-                "visible_quants_count": visible_quants.count(),
-            },
-            status=status.HTTP_200_OK,
-        )
+        This preserves a similar shape to the old `WarehouseUser` serializer but
+        is read-only and canonicalizes data from `accounts.Membership` and
+        `accounts.WarehouseAssignment`.
+        """
+        # Build entries from accounts models
+        try:
+            from accounts.models import Membership, WarehouseAssignment
+        except Exception:
+            return Response({"error": "accounts app not available"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        entries = []
+        # Company-scoped memberships
+        for m in Membership.objects.select_related("user", "company").all():
+            entries.append(
+                {
+                    "id": m.id,
+                    "user": m.user_id,
+                    "user_username": getattr(m.user, "username", ""),
+                    "company": m.company_id,
+                    "company_name": getattr(m.company, "name", ""),
+                    "warehouse": None,
+                    "warehouse_name": None,
+                    "role": m.role,
+                    "active": True,
+                    "created_at": m.created_at,
+                    "updated_at": m.updated_at,
+                }
+            )
+
+        # Warehouse-scoped assignments
+        for wa in WarehouseAssignment.objects.select_related("user", "warehouse").all():
+            entries.append(
+                {
+                    "id": wa.id + 1000000000,  # synthetic id space to avoid colliding with membership ids
+                    "user": wa.user_id,
+                    "user_username": getattr(wa.user, "username", ""),
+                    "company": wa.warehouse.company_id if wa.warehouse_id else None,
+                    "company_name": getattr(getattr(wa.warehouse, "company", None), "name", None),
+                    "warehouse": wa.warehouse_id,
+                    "warehouse_name": getattr(wa.warehouse, "name", ""),
+                    "role": (30 if wa.can_manage else 20),
+                    "active": True,
+                    "created_at": wa.created_at,
+                    "updated_at": wa.updated_at,
+                }
+            )
+
+        serializer = self.get_serializer(entries, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None, *args, **kwargs):
+        # retrieve: find by membership id or synthetic assignment id
+        try:
+            m = Membership.objects.select_related("user", "company").get(id=pk)
+            entry = {
+                "id": m.id,
+                "user": m.user_id,
+                "user_username": getattr(m.user, "username", ""),
+                "company": m.company_id,
+                "company_name": getattr(m.company, "name", ""),
+                "warehouse": None,
+                "warehouse_name": None,
+                "role": m.role,
+                "active": True,
+                "created_at": m.created_at,
+                "updated_at": m.updated_at,
+            }
+            serializer = self.get_serializer(entry)
+            return Response(serializer.data)
+        except Membership.DoesNotExist:
+            pass
+
+        try:
+            if int(pk) > 1000000000:
+                real_id = int(pk) - 1000000000
+                wa = WarehouseAssignment.objects.select_related("user", "warehouse").get(id=real_id)
+                entry = {
+                    "id": int(pk),
+                    "user": wa.user_id,
+                    "user_username": getattr(wa.user, "username", ""),
+                    "company": wa.warehouse.company_id if wa.warehouse_id else None,
+                    "company_name": getattr(getattr(wa.warehouse, "company", None), "name", None),
+                    "warehouse": wa.warehouse_id,
+                    "warehouse_name": getattr(wa.warehouse, "name", ""),
+                    "role": (30 if wa.can_manage else 20),
+                    "active": True,
+                    "created_at": wa.created_at,
+                    "updated_at": wa.updated_at,
+                }
+                serializer = self.get_serializer(entry)
+                return Response(serializer.data)
+        except WarehouseAssignment.DoesNotExist:
+            pass
+
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 

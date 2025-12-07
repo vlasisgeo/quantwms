@@ -86,17 +86,11 @@ class QuantViewSet(viewsets.ModelViewSet):
             return Quant.objects.all()
 
         # Lazy imports to avoid circular import at module load time
-        from core.models import WarehouseUser, get_user_warehouses
-        from core.models import Company
+        from core.models import get_user_warehouses, get_user_companies
 
-        # Warehouses the user is explicitly bound to
+        # Warehouses and companies the user is explicitly bound to (accounts preferred)
         warehouses = get_user_warehouses(user)
-
-        # Explicit companies assigned via WarehouseUser.company (don't infer from warehouses)
-        explicit_company_ids = WarehouseUser.objects.filter(
-            user=user, company__isnull=False, active=True
-        ).values_list("company_id", flat=True)
-        companies = Company.objects.filter(id__in=explicit_company_ids) if explicit_company_ids else Company.objects.none()
+        companies = get_user_companies(user)
 
         # Decide result based on which sets are present
         if warehouses.exists() and companies.exists():

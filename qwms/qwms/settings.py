@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'core',
     'inventory',
     'orders',
+    'accounts',
 ]
 
 MIDDLEWARE = [
@@ -57,6 +58,8 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
+    # Tenant resolution middleware: sets request.company and assigned warehouses
+    'accounts.middleware.TenantMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
@@ -159,5 +162,13 @@ SPECTACULAR_SETTINGS = {
     'SCHEMA_COERCE_DECIMAL_TO_STRING': False,
     'COERCE_DECIMAL_TO_STRING': False,
 }
+
+# Feature flag: keep legacy `core.models.WarehouseUser` admin API and views enabled.
+# Set to False to make the compatibility layer opt-in/disabled; the new `accounts`
+# models (Membership, WarehouseAssignment) will be the canonical source of truth.
+USE_LEGACY_WAREHOUSEUSER = False
+# Backwards-compat mirroring flag: when True, `accounts` will mirror entries into
+# the legacy `core.WarehouseUser` table. This is disabled when removing legacy model.
+ACCOUNTS_MIRROR_LEGACY = False
 
 

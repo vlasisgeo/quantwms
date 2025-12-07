@@ -13,6 +13,7 @@ transactional inventory operations implemented in the `inventory` app.
 """
 
 import uuid
+import warnings
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
@@ -81,7 +82,13 @@ class Warehouse(TimeStampedModel):
 
     def is_user_allowed(self, user: User) -> bool:
         """Check if a given user has access to this warehouse via mappings."""
-        return WarehouseUser.objects.filter(user=user, warehouse=self, active=True).exists()
+        # Use accounts-backed assignments; fall back to no access if accounts not present
+        try:
+            from accounts.models import WarehouseAssignment
+
+            return WarehouseAssignment.objects.filter(user=user, warehouse=self, ).exists()
+        except Exception:
+            return False
 
 
 class Section(TimeStampedModel):
@@ -173,50 +180,30 @@ class Bin(TimeStampedModel):
         return self.warehouse.company
 
 
-class WarehouseUser(TimeStampedModel):
-    """Maps a Django user to a Warehouse (or Company) with a role.
-
-    Roles are intentionally simple: VIEWER, OPERATOR, ADMIN. Permissions in the
-    API layer will map to these roles.
-    """
-
-    ROLE_VIEWER = 10
-    ROLE_OPERATOR = 20
-    ROLE_ADMIN = 30
-
-    ROLE_CHOICES = ((ROLE_VIEWER, "viewer"), (ROLE_OPERATOR, "operator"), (ROLE_ADMIN, "admin"))
-
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, null=True, blank=True)
-    warehouse = models.ForeignKey(Warehouse, on_delete=models.CASCADE, null=True, blank=True)
-    role = models.PositiveSmallIntegerField(choices=ROLE_CHOICES, default=ROLE_VIEWER)
-    active = models.BooleanField(default=True)
-
-    class Meta:
-        unique_together = (("user", "company"), ("user", "warehouse"))
-        ordering = ["user_id"]
-
-    def __str__(self) -> str:  # pragma: no cover - trivial
-        target = self.warehouse or self.company
-        return f"{self.user.username} - {target} [{self.get_role_display()}]"
-
-    def is_admin(self) -> bool:
-        return self.role == self.ROLE_ADMIN and self.active
+# Legacy `WarehouseUser` model removed. The new canonical models are in `accounts`.
 
 
 # Small utility functions that other apps can import
 
 def get_user_companies(user: User):
     """Return active companies a user has access to (explicit mappings only)."""
-    # Return only companies explicitly assigned to the user via WarehouseUser.company
-    return Company.objects.filter(
-        id__in=WarehouseUser.objects.filter(user=user, company__isnull=False, active=True).values_list(
-            "company_id", flat=True
-        ),
-        active=True,
-    ).distinct()
+    # Use accounts.Membership as the canonical source of truth. If accounts is
+    # not available, return an empty queryset to avoid silent incorrect access.
+    try:
+        from accounts.models import Membership
+
+        company_ids = Membership.objects.filter(user=user).values_list("company_id", flat=True)
+        return Company.objects.filter(id__in=company_ids, active=True).distinct()
+    except Exception:
+        return Company.objects.none()
 
 
 def get_user_warehouses(user: User):
     """Return warehouses accessible to the user."""
-    return Warehouse.objects.filter(warehouseuser__user=user, warehouseuser__active=True)
+    try:
+        from accounts.models import WarehouseAssignment
+
+        warehouse_ids = WarehouseAssignment.objects.filter(user=user).values_list("warehouse_id", flat=True)
+        return Warehouse.objects.filter(id__in=warehouse_ids)
+    except Exception:
+        return Warehouse.objects.none()
