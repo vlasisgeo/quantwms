@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'inventory',
     'orders',
     'accounts',
+    'erp_connector',
 ]
 
 MIDDLEWARE = [
@@ -161,6 +162,11 @@ SPECTACULAR_SETTINGS = {
     'SERVE_PERMISSIONS': ['rest_framework.permissions.AllowAny'],
     'SCHEMA_COERCE_DECIMAL_TO_STRING': False,
     'COERCE_DECIMAL_TO_STRING': False,
+    'ENUM_NAME_OVERRIDES': {
+        # drf-spectacular detected multiple choice-sets named `CodeEnum`.
+        # Map the inventory StockCategory choices to a clearer schema enum name.
+        'InventoryCategoryCode': 'inventory.models.StockCategory.CATEGORY_CHOICES',
+    },
 }
 
 # Feature flag: keep legacy `core.models.WarehouseUser` admin API and views enabled.

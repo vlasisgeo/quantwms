@@ -21,6 +21,7 @@ from inventory.views import (
     MovementViewSet,
 )
 from orders.views import DocumentViewSet, DocumentLineViewSet, ReservationViewSet
+from django.urls import include, path as _path
 
 # Create router and register viewsets
 router = DefaultRouter()
@@ -52,4 +53,5 @@ urlpatterns = [
     # JWT Auth
     path("auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    _path('erp/', include('erp_connector.urls')),
 ]
