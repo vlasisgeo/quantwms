@@ -112,6 +112,58 @@ class BinSerializer(serializers.ModelSerializer):
         return obj.label
 
 
+class LocationCreateSerializer(serializers.Serializer):
+    """Serializer for creating a single location (Bin)."""
+
+    warehouse = serializers.PrimaryKeyRelatedField(queryset=Warehouse.objects.all())
+    section = serializers.PrimaryKeyRelatedField(queryset=Section.objects.all())
+    location_code = serializers.CharField(max_length=100)
+    bin_type = serializers.PrimaryKeyRelatedField(queryset=BinType.objects.all(), allow_null=True, required=False)
+    note = serializers.CharField(allow_blank=True, required=False)
+
+    def validate(self, data):
+        # Ensure section belongs to warehouse
+        section = data.get('section')
+        warehouse = data.get('warehouse')
+        if section.warehouse_id != warehouse.id:
+            raise serializers.ValidationError('Section does not belong to the specified warehouse')
+        return data
+
+
+class DexionMassCreateSerializer(serializers.Serializer):
+    """Serializer for mass-creating Dexion-style locations.
+
+    Example params:
+      aisle_from, aisle_to: integers
+      bay_from, bay_to: integers
+      level_from, level_to: integers
+      format: string using tokens {aisle},{bay},{level} (default: "A{aisle}-B{bay}-L{level}")
+      pad_aisle/bay/level: integer zero-padding width
+    """
+
+    warehouse = serializers.PrimaryKeyRelatedField(queryset=Warehouse.objects.all())
+    section = serializers.PrimaryKeyRelatedField(queryset=Section.objects.all())
+    aisle_from = serializers.IntegerField(min_value=0, default=1)
+    aisle_to = serializers.IntegerField(min_value=0, default=1)
+    bay_from = serializers.IntegerField(min_value=0, default=1)
+    bay_to = serializers.IntegerField(min_value=0, default=1)
+    level_from = serializers.IntegerField(min_value=0, default=1)
+    level_to = serializers.IntegerField(min_value=0, default=1)
+    format = serializers.CharField(default='A{aisle}-B{bay}-L{level}')
+    pad_aisle = serializers.IntegerField(min_value=0, default=0)
+    pad_bay = serializers.IntegerField(min_value=0, default=2)
+    pad_level = serializers.IntegerField(min_value=0, default=2)
+
+    def validate(self, data):
+        section = data.get('section')
+        warehouse = data.get('warehouse')
+        if section.warehouse_id != warehouse.id:
+            raise serializers.ValidationError('Section does not belong to the specified warehouse')
+        if data['aisle_to'] < data['aisle_from'] or data['bay_to'] < data['bay_from'] or data['level_to'] < data['level_from']:
+            raise serializers.ValidationError('Range end must be >= range start')
+        return data
+
+
 class UserAccessEntrySerializer(serializers.Serializer):
     """Read-only serializer that represents a user's access entry.
 

@@ -86,3 +86,12 @@ qwms/accounts/__pycache__/models.cpython-312.pyc
 qwms/accounts/__pycache__/signals.cpython-312.pyc
 qwms/accounts/migrations/__pycache__/__init__.cpython-312.pyc
 qwms/accounts/migrations/__pycache__/0001_initial.cpython-312.pyc
+qwms/accounts/__pycache__/permissions.cpython-312.pyc
+qwms/core/__pycache__/tests.cpython-312-pytest-7.4.3.pyc
+qwms/erp_connector/__pycache__/models.cpython-312.pyc
+qwms/erp_connector/migrations/__pycache__/0002_delivery.cpython-312.pyc
+qwms/erp_connector/__pycache__/models.cpython-312.pyc
+qwms/inventory/__pycache__/tests.cpython-312-pytest-7.4.3.pyc
+qwms/orders/__pycache__/tests.cpython-312-pytest-7.4.3.pyc
+qwms/tests/__pycache__/test_locations_api.cpython-312-pytest-7.4.3.pyc
+qwms/erp_connector/__pycache__/models.cpython-312.pyc

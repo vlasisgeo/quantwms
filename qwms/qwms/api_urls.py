@@ -22,6 +22,7 @@ from inventory.views import (
 )
 from orders.views import DocumentViewSet, DocumentLineViewSet, ReservationViewSet
 from django.urls import include, path as _path
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
 # Create router and register viewsets
 router = DefaultRouter()
@@ -54,4 +55,8 @@ urlpatterns = [
     path("auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     _path('erp/', include('erp_connector.urls')),
+    # OpenAPI / Swagger / Redoc
+    path('schema/', SpectacularAPIView.as_view(), name='schema'),
+    path('schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('schema/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 ]

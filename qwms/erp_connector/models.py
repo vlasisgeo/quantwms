@@ -47,3 +47,39 @@ class InboundEvent(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"InboundEvent({self.event_type} id={self.event_id})"
+
+
+class Delivery(models.Model):
+    """Outbound delivery record for notifying ERP about local events.
+
+    The `payload` stores the JSON body sent, `event_type` indicates the
+    ERP event (e.g., `order.fulfilled`, `inventory.qty_changed`). The
+    `sent_at` and `status` fields track delivery progress for retries.
+    """
+
+    STATUS_PENDING = "PENDING"
+    STATUS_SENT = "SENT"
+    STATUS_FAILED = "FAILED"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_SENT, "Sent"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    integration = models.ForeignKey(ERPIntegration, on_delete=models.CASCADE, related_name='deliveries')
+    event_type = models.CharField(max_length=100, db_index=True)
+    payload = models.JSONField()
+    created_at = models.DateTimeField(default=timezone.now)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    last_error = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = 'Outbound Delivery'
+        verbose_name_plural = 'Outbound Deliveries'
+        indexes = [models.Index(fields=['integration', 'status'])]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"Delivery({self.event_type} integration={self.integration_id} status={self.status})"
