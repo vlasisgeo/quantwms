@@ -21,6 +21,9 @@ const schema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   weight_grams: z.coerce.number().nullable().optional(),
+  length_mm: z.coerce.number().nullable().optional(),
+  width_mm: z.coerce.number().nullable().optional(),
+  height_mm: z.coerce.number().nullable().optional(),
   fragile: z.boolean().optional(),
   hazardous: z.boolean().optional(),
   active: z.boolean().optional(),
@@ -49,7 +52,7 @@ export default function Items() {
   })
 
   function openCreate() {
-    reset({ sku: '', name: '', description: '', active: true })
+    reset({ sku: '', name: '', description: '', active: true, length_mm: undefined, width_mm: undefined, height_mm: undefined })
     setModal('create')
   }
 
@@ -129,7 +132,14 @@ export default function Items() {
             <Input label="Name" id="name" error={errors.name?.message} {...register('name')} />
           </div>
           <Input label="Description" id="description" {...register('description')} />
-          <Input label="Weight (grams)" id="weight_grams" type="number" {...register('weight_grams')} />
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Weight (g)" id="weight_grams" type="number" {...register('weight_grams')} />
+            <Input label="Length (mm)" id="length_mm" type="number" {...register('length_mm')} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Width (mm)" id="width_mm" type="number" {...register('width_mm')} />
+            <Input label="Height (mm)" id="height_mm" type="number" {...register('height_mm')} />
+          </div>
           <div className="flex gap-6">
             {(['fragile', 'hazardous', 'active'] as const).map((f) => (
               <label key={f} className="flex items-center gap-2 text-sm capitalize">

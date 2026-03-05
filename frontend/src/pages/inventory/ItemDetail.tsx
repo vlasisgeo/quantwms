@@ -20,6 +20,9 @@ const schema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   weight_grams: z.coerce.number().nullable().optional(),
+  length_mm: z.coerce.number().nullable().optional(),
+  width_mm: z.coerce.number().nullable().optional(),
+  height_mm: z.coerce.number().nullable().optional(),
   fragile: z.boolean().optional(),
   hazardous: z.boolean().optional(),
   active: z.boolean().optional(),
@@ -81,7 +84,7 @@ export default function ItemDetail() {
 
   function openEdit() {
     if (!item) return
-    reset({ name: item.name, description: item.description, weight_grams: item.weight_grams, fragile: item.fragile, hazardous: item.hazardous, active: item.active })
+    reset({ name: item.name, description: item.description, weight_grams: item.weight_grams, length_mm: item.length_mm, width_mm: item.width_mm, height_mm: item.height_mm, fragile: item.fragile, hazardous: item.hazardous, active: item.active })
     setEditOpen(true)
   }
 
@@ -124,6 +127,7 @@ export default function ItemDetail() {
               ['Name', item.name],
               ['Description', item.description || '—'],
               ['Weight', item.weight_grams ? `${item.weight_grams} g` : '—'],
+              ['Dimensions (L×W×H)', (item.length_mm || item.width_mm || item.height_mm) ? `${item.length_mm ?? 0} × ${item.width_mm ?? 0} × ${item.height_mm ?? 0} mm` : '—'],
             ].map(([label, val]) => (
               <div key={label}>
                 <p className="text-xs text-slate-500">{label}</p>
@@ -193,7 +197,14 @@ export default function ItemDetail() {
         <form onSubmit={handleSubmit((d) => updateMutation.mutate(d))} className="space-y-4">
           <Input label="Name" error={errors.name?.message} {...register('name')} />
           <Input label="Description" {...register('description')} />
-          <Input label="Weight (grams)" type="number" {...register('weight_grams')} />
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Weight (g)" type="number" {...register('weight_grams')} />
+            <Input label="Length (mm)" type="number" {...register('length_mm')} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Width (mm)" type="number" {...register('width_mm')} />
+            <Input label="Height (mm)" type="number" {...register('height_mm')} />
+          </div>
           <div className="flex gap-6">
             {(['fragile', 'hazardous', 'active'] as const).map((f) => (
               <label key={f} className="flex items-center gap-2 text-sm capitalize">
