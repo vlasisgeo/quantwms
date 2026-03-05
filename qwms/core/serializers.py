@@ -85,6 +85,7 @@ class BinSerializer(serializers.ModelSerializer):
     section_code = serializers.CharField(source="section.code", read_only=True)
     bin_type_name = serializers.CharField(source="bin_type.name", read_only=True)
     label = serializers.SerializerMethodField()
+    quants_count = serializers.IntegerField(read_only=True, default=0)
 
     class Meta:
         model = Bin
@@ -101,6 +102,7 @@ class BinSerializer(serializers.ModelSerializer):
             "active",
             "note",
             "label",
+            "quants_count",
             "created_at",
             "updated_at",
         ]

@@ -54,6 +54,7 @@ export const binsApi = {
   createLocation: (data: unknown) => post<Bin>('/bins/create-location/', data),
   massCreate: (data: unknown) => post<unknown>('/bins/mass-create-dexion/', data),
   inventory: (id: number) => get<unknown>(`/bins/${id}/inventory/`),
+  patch: (id: number, data: Partial<Bin>) => patch<Bin>(`/bins/${id}/`, data),
 }
 
 export const binTypesApi = {

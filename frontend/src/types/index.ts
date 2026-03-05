@@ -55,6 +55,7 @@ export interface Bin {
   bin_type: number | null
   active: boolean
   note: string
+  quants_count: number
 }
 
 // ── Inventory ─────────────────────────────────────────────────────────────────

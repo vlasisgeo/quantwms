@@ -1,5 +1,6 @@
 """Views/Viewsets for core app."""
 
+from django.db import models
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -81,7 +82,9 @@ class BinTypeViewSet(viewsets.ModelViewSet):
 class BinViewSet(viewsets.ModelViewSet):
     """ViewSet for Bin (storage location)."""
 
-    queryset = Bin.objects.select_related("warehouse", "section", "bin_type")
+    queryset = Bin.objects.select_related("warehouse", "section", "bin_type").annotate(
+        quants_count=models.Count("quants", distinct=True)
+    )
     serializer_class = BinSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["warehouse", "section", "active"]
