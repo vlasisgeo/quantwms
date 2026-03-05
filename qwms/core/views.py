@@ -3,7 +3,6 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.db import models
 
 from core.models import Company, Warehouse, Section, BinType, Bin
 from core.serializers import (
@@ -22,9 +21,10 @@ class CompanyViewSet(viewsets.ModelViewSet):
     queryset = Company.objects.all()
     serializer_class = CompanySerializer
     permission_classes = [permissions.IsAuthenticated]
+    search_fields = ["code", "name"]
+    ordering_fields = ["name", "code"]
 
     def get_queryset(self):
-        """Filter companies by user access."""
         user = self.request.user
         if user.is_staff:
             return Company.objects.all()
@@ -36,46 +36,57 @@ class CompanyViewSet(viewsets.ModelViewSet):
 class WarehouseViewSet(viewsets.ModelViewSet):
     """ViewSet for Warehouse."""
 
-    queryset = Warehouse.objects.all()
+    queryset = Warehouse.objects.select_related("company")
     serializer_class = WarehouseSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["company", "active"]
+    search_fields = ["code", "name"]
+    ordering_fields = ["code", "name"]
 
     def get_queryset(self):
-        """Filter warehouses by user access."""
         user = self.request.user
         if user.is_staff:
-            return Warehouse.objects.all()
+            return Warehouse.objects.select_related("company")
         from core.models import get_user_warehouses
 
-        return get_user_warehouses(user).distinct()
+        return get_user_warehouses(user).select_related("company").distinct()
 
 
 class SectionViewSet(viewsets.ModelViewSet):
     """ViewSet for Section."""
 
-    queryset = Section.objects.all()
+    queryset = Section.objects.select_related("warehouse")
     serializer_class = SectionSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["warehouse", "active"]
+    search_fields = ["code", "name"]
+    ordering_fields = ["code", "name"]
 
 
 class BinTypeViewSet(viewsets.ModelViewSet):
-    """ViewSet for BinType."""
+    """ViewSet for BinType. Writes restricted to admins."""
 
     queryset = BinType.objects.all()
     serializer_class = BinTypeSerializer
-    permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["active"]
+    search_fields = ["name"]
+    ordering_fields = ["name"]
+
+    def get_permissions(self):
+        if self.action in ["create", "update", "partial_update", "destroy"]:
+            return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated()]
 
 
 class BinViewSet(viewsets.ModelViewSet):
     """ViewSet for Bin (storage location)."""
 
-    queryset = Bin.objects.all()
+    queryset = Bin.objects.select_related("warehouse", "section", "bin_type")
     serializer_class = BinSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["warehouse", "section", "active"]
+    search_fields = ["location_code"]
+    ordering_fields = ["location_code", "warehouse__code", "section__code"]
 
     @action(detail=True, methods=["get"])
     def inventory(self, request, pk=None):
@@ -160,7 +171,6 @@ class BinViewSet(viewsets.ModelViewSet):
         return Response({'created': created, 'skipped': skipped})
 
     def _render_zpl_for_bin(self, bin_obj: Bin) -> str:
-        """Render a simple ZPL label for a Bin object."""
         warehouse = getattr(bin_obj.warehouse, 'code', '')
         section = getattr(bin_obj.section, 'code', '')
         location = bin_obj.location_code

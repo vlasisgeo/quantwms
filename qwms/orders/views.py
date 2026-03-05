@@ -3,7 +3,6 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.shortcuts import get_object_or_404
 from django.core.exceptions import ValidationError
 from django.db.models import F
 
@@ -21,19 +20,48 @@ from inventory.models import Item
 from core.models import Warehouse, Company
 
 
+def _scoped_document_qs(user):
+    """Return a Document queryset scoped to the user's accessible warehouses/companies."""
+    qs = Document.objects.select_related(
+        "warehouse", "warehouse_to", "owner", "created_by"
+    ).prefetch_related("lines__item")
+
+    if user.is_staff:
+        return qs
+
+    from core.models import get_user_warehouses, get_user_companies
+
+    warehouses = get_user_warehouses(user)
+    companies = get_user_companies(user)
+
+    if warehouses.exists() and companies.exists():
+        return qs.filter(warehouse__in=warehouses, owner__in=companies).distinct()
+    if warehouses.exists():
+        return qs.filter(warehouse__in=warehouses).distinct()
+    if companies.exists():
+        return qs.filter(owner__in=companies).distinct()
+
+    return qs.none()
+
+
 class DocumentViewSet(viewsets.ModelViewSet):
     """ViewSet for Document (order/transfer/receipt)."""
 
-    queryset = Document.objects.all()
+    queryset = Document.objects.select_related("warehouse", "warehouse_to", "owner", "created_by")
     serializer_class = DocumentSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["warehouse", "owner", "status", "doc_type"]
+    search_fields = ["doc_number", "erp_doc_number"]
+    ordering_fields = ["created_at", "doc_number", "status", "doc_type"]
+    ordering = ["-created_at"]
 
-    @action(detail=False, methods=["post"])
-    def create_document(self, request):
+    def get_queryset(self):
+        return _scoped_document_qs(self.request.user)
+
+    def create(self, request, *args, **kwargs):
         """
-        Create a new Document.
-        POST /api/documents/create_document/
+        Create a new Document via standard REST endpoint.
+        POST /api/documents/
         {
             "doc_number": "SO-001",
             "doc_type": 100,
@@ -43,34 +71,33 @@ class DocumentViewSet(viewsets.ModelViewSet):
             "notes": "Customer order"
         }
         """
+        return self._build_document(request)
+
+    @action(detail=False, methods=["post"])
+    def create_document(self, request):
+        """Alias for POST /api/documents/ — kept for backwards compatibility."""
+        return self._build_document(request)
+
+    def _build_document(self, request):
         serializer = CreateDocumentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         try:
             warehouse = Warehouse.objects.get(id=serializer.data["warehouse_id"])
         except Warehouse.DoesNotExist:
-            return Response(
-                {"error": "Warehouse not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({"error": "Warehouse not found"}, status=status.HTTP_404_NOT_FOUND)
 
         warehouse_to = None
         if serializer.data.get("warehouse_to_id"):
             try:
                 warehouse_to = Warehouse.objects.get(id=serializer.data["warehouse_to_id"])
             except Warehouse.DoesNotExist:
-                return Response(
-                    {"error": "Destination warehouse not found"},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
+                return Response({"error": "Destination warehouse not found"}, status=status.HTTP_404_NOT_FOUND)
 
         try:
             owner = Company.objects.get(id=serializer.data["owner_id"])
         except Company.DoesNotExist:
-            return Response(
-                {"error": "Owner (Company) not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({"error": "Owner (Company) not found"}, status=status.HTTP_404_NOT_FOUND)
 
         doc = Document.objects.create(
             doc_number=serializer.data["doc_number"],
@@ -83,10 +110,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
             created_by=request.user,
         )
 
-        return Response(
-            DocumentSerializer(doc).data,
-            status=status.HTTP_201_CREATED,
-        )
+        return Response(DocumentSerializer(doc).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])
     def add_line(self, request, pk=None):
@@ -101,16 +125,20 @@ class DocumentViewSet(viewsets.ModelViewSet):
         }
         """
         doc = self.get_object()
+
+        if doc.status in (Document.Status.COMPLETED, Document.Status.CANCELED):
+            return Response(
+                {"error": f"Cannot add lines to a {doc.get_status_display()} document"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         serializer = AddDocumentLineSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         try:
             item = Item.objects.get(sku=serializer.data["item_sku"])
         except Item.DoesNotExist:
-            return Response(
-                {"error": "Item not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({"error": "Item not found"}, status=status.HTTP_404_NOT_FOUND)
 
         line = DocumentLine.objects.create(
             document=doc,
@@ -121,10 +149,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
             notes=serializer.data.get("notes", ""),
         )
 
-        return Response(
-            DocumentLineSerializer(line).data,
-            status=status.HTTP_201_CREATED,
-        )
+        return Response(DocumentLineSerializer(line).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])
     def reserve(self, request, pk=None):
@@ -136,6 +161,12 @@ class DocumentViewSet(viewsets.ModelViewSet):
         }
         """
         doc = self.get_object()
+
+        if doc.status == Document.Status.CANCELED:
+            return Response({"error": "Cannot reserve a canceled document"}, status=status.HTTP_400_BAD_REQUEST)
+        if doc.status == Document.Status.COMPLETED:
+            return Response({"error": "Document is already completed"}, status=status.HTTP_400_BAD_REQUEST)
+
         serializer = ReserveDocumentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -160,6 +191,12 @@ class DocumentViewSet(viewsets.ModelViewSet):
         POST /api/documents/{id}/cancel/
         """
         doc = self.get_object()
+
+        if doc.status == Document.Status.CANCELED:
+            return Response({"error": "Document is already canceled"}, status=status.HTTP_400_BAD_REQUEST)
+        if doc.status == Document.Status.COMPLETED:
+            return Response({"error": "Cannot cancel a completed document"}, status=status.HTTP_400_BAD_REQUEST)
+
         doc.cancel(created_by=request.user)
 
         return Response(
@@ -174,56 +211,40 @@ class DocumentViewSet(viewsets.ModelViewSet):
     def picking_list(self, request, pk=None):
         """
         Return a picking list for this Document.
-
         GET /api/documents/{id}/picking_list/
-
-        Response structure:
-        {
-            "document": { ... },
-            "picking_list": [
-                {"bin": "A-01", "items": [ {reservation entries...} ] },
-                ...
-            ]
-        }
         """
         doc = self.get_object()
 
-        # Reservations for this document that still have remaining qty to pick
         reservations = (
             Reservation.objects
             .filter(line__document=doc)
-            .filter(qty__gt=F('qty_picked'))
-            .select_related('quant', 'line__item', 'quant__bin', 'quant__lot')
-            .order_by('quant__bin__location_code')
+            .filter(qty__gt=F("qty_picked"))
+            .select_related("quant__bin", "quant__lot", "line__item")
+            .order_by("quant__bin__location_code")
         )
 
-        # Group reservations by bin location for a picker-friendly list
         grouped = {}
         for r in reservations:
-            bin_code = getattr(r.quant.bin, 'location_code', str(r.quant.bin))
+            bin_code = r.quant.bin.location_code
             entry = {
-                'reservation_id': r.id,
-                'quant_id': r.quant.id,
-                'item_sku': r.line.item.sku,
-                'item_name': r.line.item.name,
-                'lot_code': r.quant.lot.lot_code if r.quant.lot else None,
-                'qty': r.qty,
-                'qty_picked': r.qty_picked,
-                'qty_remaining': r.qty_remaining,
-                'bin_location': bin_code,
+                "reservation_id": r.id,
+                "quant_id": r.quant.id,
+                "item_sku": r.line.item.sku,
+                "item_name": r.line.item.name,
+                "lot_code": r.quant.lot.lot_code if r.quant.lot else None,
+                "qty": r.qty,
+                "qty_picked": r.qty_picked,
+                "qty_remaining": r.qty_remaining,
+                "bin_location": bin_code,
             }
-
             grouped.setdefault(bin_code, []).append(entry)
 
-        picking_list = [
-            {'bin': bin_code, 'items': items}
-            for bin_code, items in grouped.items()
-        ]
+        picking_list = [{"bin": bin_code, "items": items} for bin_code, items in grouped.items()]
 
         return Response(
             {
-                'document': DocumentSerializer(doc).data,
-                'picking_list': picking_list,
+                "document": DocumentSerializer(doc).data,
+                "picking_list": picking_list,
             },
             status=status.HTTP_200_OK,
         )
@@ -232,19 +253,74 @@ class DocumentViewSet(viewsets.ModelViewSet):
 class DocumentLineViewSet(viewsets.ModelViewSet):
     """ViewSet for DocumentLine."""
 
-    queryset = DocumentLine.objects.all()
+    queryset = DocumentLine.objects.select_related("document__warehouse", "document__owner", "item")
     serializer_class = DocumentLineSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["document", "item"]
+    ordering_fields = ["id", "qty_requested", "qty_allocated", "qty_picked"]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = DocumentLine.objects.select_related("document__warehouse", "document__owner", "item")
+
+        if user.is_staff:
+            return qs
+
+        from core.models import get_user_warehouses, get_user_companies
+
+        warehouses = get_user_warehouses(user)
+        companies = get_user_companies(user)
+
+        if warehouses.exists() and companies.exists():
+            return qs.filter(
+                document__warehouse__in=warehouses, document__owner__in=companies
+            ).distinct()
+        if warehouses.exists():
+            return qs.filter(document__warehouse__in=warehouses).distinct()
+        if companies.exists():
+            return qs.filter(document__owner__in=companies).distinct()
+
+        return qs.none()
 
 
 class ReservationViewSet(viewsets.ModelViewSet):
     """ViewSet for Reservation."""
 
-    queryset = Reservation.objects.all()
+    queryset = Reservation.objects.select_related(
+        "line__document__warehouse", "line__document__owner",
+        "line__item", "quant__bin", "quant__item", "quant__lot",
+    )
     serializer_class = ReservationSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["line", "quant"]
+    ordering_fields = ["id", "qty", "qty_picked"]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = Reservation.objects.select_related(
+            "line__document__warehouse", "line__document__owner",
+            "line__item", "quant__bin", "quant__item", "quant__lot",
+        )
+
+        if user.is_staff:
+            return qs
+
+        from core.models import get_user_warehouses, get_user_companies
+
+        warehouses = get_user_warehouses(user)
+        companies = get_user_companies(user)
+
+        if warehouses.exists() and companies.exists():
+            return qs.filter(
+                line__document__warehouse__in=warehouses,
+                line__document__owner__in=companies,
+            ).distinct()
+        if warehouses.exists():
+            return qs.filter(line__document__warehouse__in=warehouses).distinct()
+        if companies.exists():
+            return qs.filter(line__document__owner__in=companies).distinct()
+
+        return qs.none()
 
     @action(detail=True, methods=["post"])
     def pick(self, request, pk=None):
@@ -264,10 +340,7 @@ class ReservationViewSet(viewsets.ModelViewSet):
         try:
             success = reservation.pick(qty=qty, created_by=request.user)
         except ValidationError as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         if not success:
             return Response(
@@ -292,10 +365,4 @@ class ReservationViewSet(viewsets.ModelViewSet):
         reservation = self.get_object()
         reservation.unreserve(created_by=request.user)
 
-        return Response(
-            {
-                "status": "unreserved",
-            },
-            status=status.HTTP_200_OK,
-        )
-
+        return Response({"status": "unreserved"}, status=status.HTTP_200_OK)

@@ -30,61 +30,80 @@ from inventory.serializers import (
 
 
 class ItemCategoryViewSet(viewsets.ModelViewSet):
-    """ViewSet for ItemCategory."""
+    """ViewSet for ItemCategory. Writes restricted to admins."""
 
     queryset = ItemCategory.objects.all()
     serializer_class = ItemCategorySerializer
-    permission_classes = [permissions.IsAuthenticated]
+    search_fields = ["name"]
+    ordering_fields = ["name"]
+
+    def get_permissions(self):
+        if self.action in ["create", "update", "partial_update", "destroy"]:
+            return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated()]
 
 
 class ItemViewSet(viewsets.ModelViewSet):
     """ViewSet for Item (product/SKU)."""
 
-    queryset = Item.objects.all()
+    queryset = Item.objects.select_related("category")
     serializer_class = ItemSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["category", "active"]
     search_fields = ["sku", "name"]
+    ordering_fields = ["sku", "name", "created_at"]
 
 
 class LotViewSet(viewsets.ModelViewSet):
     """ViewSet for Lot (batch)."""
 
-    queryset = Lot.objects.all()
+    queryset = Lot.objects.select_related("item")
     serializer_class = LotSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["item"]
+    search_fields = ["lot_code", "item__sku"]
+    ordering_fields = ["lot_code", "expiry_date", "manufacture_date"]
 
 
 class StockCategoryViewSet(viewsets.ModelViewSet):
-    """ViewSet for StockCategory."""
+    """ViewSet for StockCategory. Writes restricted to admins."""
 
     queryset = StockCategory.objects.all()
     serializer_class = StockCategorySerializer
-    permission_classes = [permissions.IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ["create", "update", "partial_update", "destroy"]:
+            return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated()]
 
 
 class QuantViewSet(viewsets.ModelViewSet):
     """ViewSet for Quant (inventory unit)."""
 
-    queryset = Quant.objects.all()
+    queryset = Quant.objects.select_related(
+        "item", "bin", "bin__section", "bin__warehouse", "lot", "stock_category", "owner"
+    )
     serializer_class = QuantSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["item", "bin", "owner", "stock_category"]
+    search_fields = ["item__sku", "item__name", "bin__location_code"]
+    ordering_fields = ["received_at", "qty", "item__sku", "bin__location_code"]
 
     def get_queryset(self):
-        """Return quants allowed for the current user using intersection semantics when both
-        explicit company bindings and warehouse bindings exist.
+        """Return quants allowed for the current user.
 
         Rules:
         - staff: all quants
         - only warehouses: all quants in those warehouses
         - only companies: all quants owned by those companies
-        - both warehouses and explicit companies: quants where owner is in companies AND bin.warehouse is in warehouses
+        - both: intersection
         """
+        base_qs = Quant.objects.select_related(
+            "item", "bin", "bin__section", "bin__warehouse", "lot", "stock_category", "owner"
+        )
         user = self.request.user
         if user.is_staff:
-            return Quant.objects.all()
+            return base_qs
 
         from core.models import get_user_warehouses, get_user_companies
 
@@ -92,13 +111,13 @@ class QuantViewSet(viewsets.ModelViewSet):
         companies = get_user_companies(user)
 
         if warehouses.exists() and companies.exists():
-            return Quant.objects.filter(bin__warehouse__in=warehouses, owner__in=companies).distinct()
+            return base_qs.filter(bin__warehouse__in=warehouses, owner__in=companies).distinct()
         if warehouses.exists():
-            return Quant.objects.filter(bin__warehouse__in=warehouses).distinct()
+            return base_qs.filter(bin__warehouse__in=warehouses).distinct()
         if companies.exists():
-            return Quant.objects.filter(owner__in=companies).distinct()
+            return base_qs.filter(owner__in=companies).distinct()
 
-        return Quant.objects.none()
+        return base_qs.none()
 
     @action(detail=False, methods=["post"])
     def receive_goods(self, request):
@@ -316,10 +335,14 @@ class QuantViewSet(viewsets.ModelViewSet):
 class MovementViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for Movement (audit log, read-only)."""
 
-    queryset = Movement.objects.all()
+    queryset = Movement.objects.select_related(
+        "item", "warehouse", "from_quant__bin", "to_quant__bin", "created_by"
+    )
     serializer_class = MovementSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["item", "warehouse", "movement_type"]
+    search_fields = ["reference", "item__sku", "item__name"]
+    ordering_fields = ["created_at", "movement_type", "item__sku"]
     ordering = ["-created_at"]
 
 
