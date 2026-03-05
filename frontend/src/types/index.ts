@@ -92,9 +92,9 @@ export interface Lot {
 }
 
 export interface StockCategory {
-  id: number
   code: string
   name: string
+  description: string
 }
 
 export interface Quant {

@@ -79,6 +79,9 @@ export const lotsApi = {
 
 export const stockCategoriesApi = {
   list: () => list<StockCategory>('/stock-categories/'),
+  create: (data: Partial<StockCategory>) => post<StockCategory>('/stock-categories/', data),
+  update: (code: string, data: Partial<StockCategory>) => patch<StockCategory>(`/stock-categories/${code}/`, data),
+  destroy: (code: string) => del(`/stock-categories/${code}/`),
 }
 
 export const quantsApi = {
