@@ -76,6 +76,9 @@ class LotSerializer(serializers.ModelSerializer):
 class StockCategorySerializer(serializers.ModelSerializer):
     """Serialize StockCategory."""
 
+    # Override to skip model-level choices validation so custom codes are allowed.
+    code = serializers.CharField(max_length=50)
+
     class Meta:
         model = StockCategory
         fields = ["code", "name", "description"]
