@@ -3,9 +3,9 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.shortcuts import get_object_or_404
 from django.core.exceptions import ValidationError
 
+from core.models import Bin, Warehouse, Company
 from inventory.models import (
     ItemCategory,
     Item,
@@ -13,6 +13,8 @@ from inventory.models import (
     StockCategory,
     Quant,
     Movement,
+    get_inventory_by_item,
+    get_inventory_by_bin,
 )
 from inventory.serializers import (
     ItemCategorySerializer,
@@ -25,7 +27,6 @@ from inventory.serializers import (
     InventorySnapshotSerializer,
     TransferQuantSerializer,
 )
-from inventory.models import get_inventory_by_item, get_inventory_by_bin
 
 
 class ItemCategoryViewSet(viewsets.ModelViewSet):
@@ -85,14 +86,11 @@ class QuantViewSet(viewsets.ModelViewSet):
         if user.is_staff:
             return Quant.objects.all()
 
-        # Lazy imports to avoid circular import at module load time
         from core.models import get_user_warehouses, get_user_companies
 
-        # Warehouses and companies the user is explicitly bound to (accounts preferred)
         warehouses = get_user_warehouses(user)
         companies = get_user_companies(user)
 
-        # Decide result based on which sets are present
         if warehouses.exists() and companies.exists():
             return Quant.objects.filter(bin__warehouse__in=warehouses, owner__in=companies).distinct()
         if warehouses.exists():
@@ -100,7 +98,6 @@ class QuantViewSet(viewsets.ModelViewSet):
         if companies.exists():
             return Quant.objects.filter(owner__in=companies).distinct()
 
-        # If the user has no bindings, return empty set
         return Quant.objects.none()
 
     @action(detail=False, methods=["post"])
@@ -122,28 +119,19 @@ class QuantViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         try:
-            bin = get_object_or_404(Quant.objects.model._meta.get_field("bin").related_model, id=serializer.data["bin_id"])
-        except:
-            return Response(
-                {"error": "Bin not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            bin_obj = Bin.objects.get(id=serializer.data["bin_id"])
+        except Bin.DoesNotExist:
+            return Response({"error": "Bin not found"}, status=status.HTTP_404_NOT_FOUND)
 
         try:
-            item = get_object_or_404(Item, sku=serializer.data["item_sku"])
-        except:
-            return Response(
-                {"error": "Item not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            item = Item.objects.get(sku=serializer.data["item_sku"])
+        except Item.DoesNotExist:
+            return Response({"error": "Item not found"}, status=status.HTTP_404_NOT_FOUND)
 
         try:
-            owner = get_object_or_404(Quant.objects.model._meta.get_field("owner").related_model, id=serializer.data["owner_id"])
-        except:
-            return Response(
-                {"error": "Owner (Company) not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            owner = Company.objects.get(id=serializer.data["owner_id"])
+        except Company.DoesNotExist:
+            return Response({"error": "Owner (Company) not found"}, status=status.HTTP_404_NOT_FOUND)
 
         stock_category_code = serializer.data.get("stock_category", "UNRESTRICTED")
         try:
@@ -156,36 +144,25 @@ class QuantViewSet(viewsets.ModelViewSet):
 
         lot = None
         if serializer.data.get("lot_code"):
-            lot, created = Lot.objects.get_or_create(
+            lot, _ = Lot.objects.get_or_create(
                 item=item,
                 lot_code=serializer.data["lot_code"],
             )
 
-        # Get or create quant
-        quant, created = Quant.objects.get_or_create(
+        quant, _ = Quant.objects.get_or_create(
             item=item,
-            bin=bin,
+            bin=bin_obj,
             lot=lot,
             stock_category=stock_category,
             owner=owner,
         )
 
-        # Receive the goods
         try:
-            quant.receive_qty(
-                qty=serializer.data["qty"],
-                created_by=request.user,
-            )
+            quant.receive_qty(qty=serializer.data["qty"], created_by=request.user)
         except ValidationError as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(
-            QuantSerializer(quant).data,
-            status=status.HTTP_200_OK,
-        )
+        return Response(QuantSerializer(quant).data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"])
     def by_item(self, request):
@@ -204,22 +181,14 @@ class QuantViewSet(viewsets.ModelViewSet):
         try:
             item = Item.objects.get(id=item_id)
         except Item.DoesNotExist:
-            return Response(
-                {"error": "Item not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({"error": "Item not found"}, status=status.HTTP_404_NOT_FOUND)
 
         warehouse = None
         if warehouse_id:
-            from core.models import Warehouse
-
             try:
                 warehouse = Warehouse.objects.get(id=warehouse_id)
             except Warehouse.DoesNotExist:
-                return Response(
-                    {"error": "Warehouse not found"},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
+                return Response({"error": "Warehouse not found"}, status=status.HTTP_404_NOT_FOUND)
 
         inventory_data = get_inventory_by_item(item, warehouse=warehouse)
         return Response(inventory_data, status=status.HTTP_200_OK)
@@ -241,18 +210,12 @@ class QuantViewSet(viewsets.ModelViewSet):
         try:
             from_quant = Quant.objects.get(id=serializer.data["from_quant_id"])
         except Quant.DoesNotExist:
-            return Response(
-                {"error": "Source quant not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({"error": "Source quant not found"}, status=status.HTTP_404_NOT_FOUND)
 
         try:
             to_quant = Quant.objects.get(id=serializer.data["to_quant_id"])
         except Quant.DoesNotExist:
-            return Response(
-                {"error": "Destination quant not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({"error": "Destination quant not found"}, status=status.HTTP_404_NOT_FOUND)
 
         try:
             success = from_quant.transfer_qty(
@@ -261,10 +224,7 @@ class QuantViewSet(viewsets.ModelViewSet):
                 created_by=request.user,
             )
         except ValidationError as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         if not success:
             return Response(
@@ -292,8 +252,6 @@ class QuantViewSet(viewsets.ModelViewSet):
             "notes": "Putaway to shelf A1"
         }
         """
-        from core.models import Bin
-
         from_quant_id = request.data.get("from_quant_id")
         target_bin_id = request.data.get("target_bin_id")
         qty = request.data.get("qty")
@@ -309,38 +267,22 @@ class QuantViewSet(viewsets.ModelViewSet):
             if qty <= 0:
                 raise ValueError
         except (ValueError, TypeError):
-            return Response(
-                {"error": "qty must be a positive integer"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"error": "qty must be a positive integer"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             from_quant = Quant.objects.get(id=from_quant_id)
         except Quant.DoesNotExist:
-            return Response(
-                {"error": "Source quant not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({"error": "Source quant not found"}, status=status.HTTP_404_NOT_FOUND)
 
         try:
             target_bin = Bin.objects.get(id=target_bin_id)
         except Bin.DoesNotExist:
-            return Response(
-                {"error": "Target bin not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({"error": "Target bin not found"}, status=status.HTTP_404_NOT_FOUND)
 
         try:
-            success = from_quant.transfer_to_bin(
-                target_bin=target_bin,
-                qty=qty,
-                created_by=request.user,
-            )
+            success = from_quant.transfer_to_bin(target_bin=target_bin, qty=qty, created_by=request.user)
         except ValidationError as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         if not success:
             return Response(
@@ -348,13 +290,11 @@ class QuantViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Fetch updated quant(s) for response
         try:
             updated_from_quant = Quant.objects.get(id=from_quant_id)
         except Quant.DoesNotExist:
             updated_from_quant = None
 
-        # Get or find the target quant that was just updated
         target_quant = Quant.objects.filter(
             item=from_quant.item,
             bin=target_bin,
@@ -383,18 +323,6 @@ class MovementViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ["-created_at"]
 
 
-def get_inventory_by_bin_view(bin):
+def get_inventory_by_bin_view(bin_obj):
     """Helper function for bin inventory endpoint."""
-    return get_inventory_by_bin(bin)
-
-    queryset = Movement.objects.all()
-    serializer_class = MovementSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ["item", "warehouse", "movement_type"]
-    ordering = ["-created_at"]
-
-
-def get_inventory_by_bin_view(bin):
-    """Helper function for bin inventory endpoint."""
-    return get_inventory_by_bin(bin)
-
+    return get_inventory_by_bin(bin_obj)

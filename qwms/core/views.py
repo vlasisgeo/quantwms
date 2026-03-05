@@ -3,7 +3,6 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.shortcuts import get_object_or_404
 from django.db import models
 
 from core.models import Company, Warehouse, Section, BinType, Bin
@@ -13,12 +12,8 @@ from core.serializers import (
     SectionSerializer,
     BinTypeSerializer,
     BinSerializer,
+    UserAccessEntrySerializer as _UserAccessEntrySerializer,
 )
-
-from django.conf import settings
-
-# Import serializers conditionally
-from core.serializers import UserAccessEntrySerializer as _UserAccessEntrySerializer
 
 
 class CompanyViewSet(viewsets.ModelViewSet):
@@ -33,7 +28,6 @@ class CompanyViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.is_staff:
             return Company.objects.all()
-        # Non-staff users only see companies they have access to (via accounts helpers)
         from core.models import get_user_companies
 
         return get_user_companies(user)
@@ -88,8 +82,8 @@ class BinViewSet(viewsets.ModelViewSet):
         """Get all inventory in a specific bin."""
         from inventory.views import get_inventory_by_bin_view
 
-        bin = self.get_object()
-        inventory_data = get_inventory_by_bin_view(bin)
+        bin_obj = self.get_object()
+        inventory_data = get_inventory_by_bin_view(bin_obj)
         return Response(inventory_data)
 
     @action(detail=False, methods=["post"], url_path="create-location")
@@ -104,7 +98,6 @@ class BinViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # Avoid duplicate
         existing = Bin.objects.filter(section=data['section'], location_code=data['location_code']).first()
         if existing:
             bin_obj = existing
@@ -139,7 +132,6 @@ class BinViewSet(viewsets.ModelViewSet):
 
         created = []
         skipped = 0
-        # iterate ranges
         for aisle in range(params['aisle_from'], params['aisle_to'] + 1):
             for bay in range(params['bay_from'], params['bay_to'] + 1):
                 for level in range(params['level_from'], params['level_to'] + 1):
@@ -161,25 +153,20 @@ class BinViewSet(viewsets.ModelViewSet):
                     )
                     created.append({'existing': False, 'bin': BinSerializer(b, context={'request': request}).data})
 
-        # Optionally return combined ZPL for all created bins
         if request.query_params.get('print'):
-            zpl_texts = []
-            for item in created:
-                bin_data = item['bin']
-                zpl_texts.append(self._render_zpl_from_serialized(bin_data))
+            zpl_texts = [self._render_zpl_from_serialized(item['bin']) for item in created]
             return Response('\n'.join(zpl_texts), content_type='text/plain')
 
         return Response({'created': created, 'skipped': skipped})
 
     def _render_zpl_for_bin(self, bin_obj: Bin) -> str:
         """Render a simple ZPL label for a Bin object."""
-        # Use warehouse, section, location_code and barcode on `code` (UUID)
         warehouse = getattr(bin_obj.warehouse, 'code', '')
         section = getattr(bin_obj.section, 'code', '')
         location = bin_obj.location_code
         barcode = str(bin_obj.code)
 
-        zpl = (
+        return (
             '^XA'
             f'^FO50,20^A0N,30,30^FDWH:{warehouse}^FS'
             f'^FO50,60^A0N,30,30^FDSEC:{section}^FS'
@@ -187,14 +174,13 @@ class BinViewSet(viewsets.ModelViewSet):
             f'^FO50,150^BY2^BCN,80,Y,N,N^FD{barcode}^FS'
             '^XZ'
         )
-        return zpl
 
     def _render_zpl_from_serialized(self, bin_data: dict) -> str:
         warehouse = bin_data.get('warehouse_code', '')
         section = bin_data.get('section_code', '')
         location = bin_data.get('location_code', '')
         barcode = bin_data.get('code', '')
-        zpl = (
+        return (
             '^XA'
             f'^FO50,20^A0N,30,30^FDWH:{warehouse}^FS'
             f'^FO50,60^A0N,30,30^FDSEC:{section}^FS'
@@ -202,80 +188,62 @@ class BinViewSet(viewsets.ModelViewSet):
             f'^FO50,150^BY2^BCN,80,Y,N,N^FD{barcode}^FS'
             '^XZ'
         )
-        return zpl
 
 
 class WarehouseUserViewSet(viewsets.ModelViewSet):
-    """Admin API for user access entries.
-
-    Behavior depends on `settings.USE_LEGACY_WAREHOUSEUSER`:
-    - True: original behavior backed by `core.models.WarehouseUser` (read/write).
-    - False: read-only proxy backed by `accounts` models (no modifications allowed).
-    """
+    """Admin API for user access entries (read-only proxy backed by accounts models)."""
 
     permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
-    # Always operate as a read-only accounts-backed proxy now that legacy model
-    # has been removed.
     queryset = Company.objects.none()
     serializer_class = _UserAccessEntrySerializer
-    # This is a read-only proxy (not model-backed) so we must not declare
-    # `filterset_fields` which would cause django-filter to attempt to build
-    # a model FilterSet for non-model fields during schema generation.
 
     def list(self, request, *args, **kwargs):
-        """Return a combined list of access entries from `accounts`.
-
-        This preserves a similar shape to the old `WarehouseUser` serializer but
-        is read-only and canonicalizes data from `accounts.Membership` and
-        `accounts.WarehouseAssignment`.
-        """
-        # Build entries from accounts models
+        """Return a combined list of access entries from `accounts`."""
         try:
             from accounts.models import Membership, WarehouseAssignment
         except Exception:
             return Response({"error": "accounts app not available"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        entries = []
-        # Company-scoped memberships
-        for m in Membership.objects.select_related("user", "company").all():
-            entries.append(
-                {
-                    "id": m.id,
-                    "user": m.user_id,
-                    "user_username": getattr(m.user, "username", ""),
-                    "company": m.company_id,
-                    "company_name": getattr(m.company, "name", ""),
-                    "warehouse": None,
-                    "warehouse_name": None,
-                    "role": m.role,
-                    "active": True,
-                    "created_at": m.created_at,
-                    "updated_at": m.updated_at,
-                }
-            )
 
-        # Warehouse-scoped assignments
+        entries = []
+        for m in Membership.objects.select_related("user", "company").all():
+            entries.append({
+                "id": m.id,
+                "user": m.user_id,
+                "user_username": getattr(m.user, "username", ""),
+                "company": m.company_id,
+                "company_name": getattr(m.company, "name", ""),
+                "warehouse": None,
+                "warehouse_name": None,
+                "role": m.role,
+                "active": True,
+                "created_at": m.created_at,
+                "updated_at": None,
+            })
+
         for wa in WarehouseAssignment.objects.select_related("user", "warehouse").all():
-            entries.append(
-                {
-                    "id": wa.id + 1000000000,  # synthetic id space to avoid colliding with membership ids
-                    "user": wa.user_id,
-                    "user_username": getattr(wa.user, "username", ""),
-                    "company": wa.warehouse.company_id if wa.warehouse_id else None,
-                    "company_name": getattr(getattr(wa.warehouse, "company", None), "name", None),
-                    "warehouse": wa.warehouse_id,
-                    "warehouse_name": getattr(wa.warehouse, "name", ""),
-                    "role": (30 if wa.can_manage else 20),
-                    "active": True,
-                    "created_at": wa.created_at,
-                    "updated_at": wa.updated_at,
-                }
-            )
+            entries.append({
+                "id": wa.id + 1000000000,
+                "user": wa.user_id,
+                "user_username": getattr(wa.user, "username", ""),
+                "company": wa.warehouse.company_id if wa.warehouse_id else None,
+                "company_name": getattr(getattr(wa.warehouse, "company", None), "name", None),
+                "warehouse": wa.warehouse_id,
+                "warehouse_name": getattr(wa.warehouse, "name", ""),
+                "role": (30 if wa.can_manage else 20),
+                "active": True,
+                "created_at": wa.created_at,
+                "updated_at": None,
+            })
 
         serializer = self.get_serializer(entries, many=True)
         return Response(serializer.data)
 
     def retrieve(self, request, pk=None, *args, **kwargs):
-        # retrieve: find by membership id or synthetic assignment id
+        try:
+            from accounts.models import Membership, WarehouseAssignment
+        except Exception:
+            return Response({"error": "accounts app not available"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
         try:
             m = Membership.objects.select_related("user", "company").get(id=pk)
             entry = {
@@ -289,10 +257,9 @@ class WarehouseUserViewSet(viewsets.ModelViewSet):
                 "role": m.role,
                 "active": True,
                 "created_at": m.created_at,
-                "updated_at": m.updated_at,
+                "updated_at": None,
             }
-            serializer = self.get_serializer(entry)
-            return Response(serializer.data)
+            return Response(self.get_serializer(entry).data)
         except Membership.DoesNotExist:
             pass
 
@@ -311,12 +278,10 @@ class WarehouseUserViewSet(viewsets.ModelViewSet):
                     "role": (30 if wa.can_manage else 20),
                     "active": True,
                     "created_at": wa.created_at,
-                    "updated_at": wa.updated_at,
+                    "updated_at": None,
                 }
-                serializer = self.get_serializer(entry)
-                return Response(serializer.data)
+                return Response(self.get_serializer(entry).data)
         except WarehouseAssignment.DoesNotExist:
             pass
 
         return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
-

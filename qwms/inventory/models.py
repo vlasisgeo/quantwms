@@ -310,12 +310,7 @@ class Quant(TimeStampedModel):
         if locked_quant.qty_available < qty:
             return False
 
-        # Deduct from reserved first, then from qty if needed
-        deduct_from_reserved = min(qty, locked_quant.qty_reserved)
-        deduct_from_qty = qty - deduct_from_reserved
-
-        locked_quant.qty_reserved -= deduct_from_reserved
-        locked_quant.qty -= deduct_from_qty
+        locked_quant.qty -= qty
         locked_quant.save()
 
         # Log the movement
@@ -529,16 +524,17 @@ def get_inventory_by_item(item: Item, warehouse: Warehouse = None, owner: Compan
     Returns:
         dict with total_qty, total_reserved, total_available, by_bin breakdown
     """
-    quants = Quant.objects.filter(item=item)
-    
+    quants = Quant.objects.filter(item=item).select_related("bin", "bin__warehouse", "lot", "stock_category")
+
     if warehouse:
         quants = quants.filter(bin__warehouse=warehouse)
-    
+
     if owner:
         quants = quants.filter(owner=owner)
-    
-    total_qty = quants.aggregate(Sum("qty"))["qty__sum"] or 0
-    total_reserved = quants.aggregate(Sum("qty_reserved"))["qty_reserved__sum"] or 0
+
+    totals = quants.aggregate(total_qty=Sum("qty"), total_reserved=Sum("qty_reserved"))
+    total_qty = totals["total_qty"] or 0
+    total_reserved = totals["total_reserved"] or 0
     total_available = total_qty - total_reserved
     
     by_bin = []
@@ -563,7 +559,7 @@ def get_inventory_by_item(item: Item, warehouse: Warehouse = None, owner: Compan
 
 def get_inventory_by_bin(bin: Bin) -> dict:
     """Get all inventory in a specific bin."""
-    quants = Quant.objects.filter(bin=bin)
+    quants = Quant.objects.filter(bin=bin).select_related("item", "lot", "stock_category")
     
     items = []
     for quant in quants:

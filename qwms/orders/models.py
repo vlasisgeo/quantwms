@@ -167,13 +167,22 @@ class Document(TimeStampedModel):
 
     def _update_status(self):
         """Update document status based on allocation/pick progress."""
-        if self.total_qty_picked == self.total_qty_requested:
+        totals = self.lines.aggregate(
+            requested=Sum("qty_requested"),
+            allocated=Sum("qty_allocated"),
+            picked=Sum("qty_picked"),
+        )
+        requested = totals["requested"] or 0
+        allocated = totals["allocated"] or 0
+        picked = totals["picked"] or 0
+
+        if picked == requested:
             self.status = self.Status.COMPLETED
-        elif self.total_qty_picked > 0:
+        elif picked > 0:
             self.status = self.Status.PARTIALLY_PICKED
-        elif self.total_qty_allocated == self.total_qty_requested:
+        elif allocated == requested:
             self.status = self.Status.FULLY_ALLOCATED
-        elif self.total_qty_allocated > 0:
+        elif allocated > 0:
             self.status = self.Status.PARTIALLY_ALLOCATED
         elif self.status == self.Status.DRAFT:
             pass  # stay in draft
