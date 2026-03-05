@@ -1,7 +1,7 @@
 from django.db import models
 from django.utils import timezone
 
-from core.models import Company
+from core.models import Company, Warehouse
 
 
 class ERPIntegration(models.Model):
@@ -14,9 +14,21 @@ class ERPIntegration(models.Model):
     # Secret used by ERP to sign inbound webhook payloads (HMAC-SHA256)
     inbound_secret = models.CharField(max_length=200, blank=True)
 
-    # If we implement outbound calls, store base URL and credentials here
+    # Outbound: base URL + bearer token for calling back the eshop
     outbound_base_url = models.URLField(blank=True)
     outbound_auth_token = models.CharField(max_length=200, blank=True)
+
+    # Pull sync: default warehouse for orders fetched from eshop
+    default_warehouse = models.ForeignKey(
+        Warehouse,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='erp_integrations',
+        help_text='Used when a pulled order does not specify a warehouse',
+    )
+    # Timestamp of last successful pull sync (used as ?updated_since= param)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(default=timezone.now)
 
