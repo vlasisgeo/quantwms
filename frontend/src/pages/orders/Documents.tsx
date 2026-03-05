@@ -26,6 +26,7 @@ export default function Documents() {
       page_size: PAGE_SIZE,
       ...(statusFilter ? { status: statusFilter } : {}),
     }),
+    refetchInterval: 10_000,
   })
 
   const cancelMutation = useMutation({
