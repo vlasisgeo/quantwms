@@ -8,6 +8,7 @@ import Stock from '@/pages/inventory/Stock'
 import ReceiveGoods from '@/pages/inventory/ReceiveGoods'
 import Movements from '@/pages/inventory/Movements'
 import StockCategories from '@/pages/inventory/StockCategories'
+import ItemDetail from '@/pages/inventory/ItemDetail'
 import Documents from '@/pages/orders/Documents'
 import DocumentDetail from '@/pages/orders/DocumentDetail'
 import FulfilOrder from '@/pages/orders/FulfilOrder'
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="dashboard" element={<Dashboard />} />
 
         <Route path="inventory/items" element={<Items />} />
+        <Route path="inventory/items/:id" element={<ItemDetail />} />
         <Route path="inventory/stock" element={<Stock />} />
         <Route path="inventory/receive" element={<ReceiveGoods />} />
         <Route path="inventory/movements" element={<Movements />} />
