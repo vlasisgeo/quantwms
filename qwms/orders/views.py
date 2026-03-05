@@ -4,6 +4,7 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import F
 
 from orders.models import Document, DocumentLine, Reservation
@@ -15,6 +16,7 @@ from orders.serializers import (
     AddDocumentLineSerializer,
     ReserveDocumentSerializer,
     PickReservationSerializer,
+    FulfilmentOrderSerializer,
 )
 from inventory.models import Item
 from core.models import Warehouse, Company
@@ -111,6 +113,87 @@ class DocumentViewSet(viewsets.ModelViewSet):
         )
 
         return Response(DocumentSerializer(doc).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"])
+    def fulfil(self, request):
+        """
+        Create a fulfilment order with all lines in one atomic call.
+        Optionally auto-reserve stock immediately.
+
+        POST /api/documents/fulfil/
+        {
+            "doc_number": "SO-00123",
+            "warehouse_id": 1,
+            "owner_id": 1,
+            "erp_doc_number": "SHOPIFY-9981",
+            "notes": "Next day delivery",
+            "reserve": true,
+            "strategy": "FIFO",
+            "lines": [
+                {"item_sku": "SKU-001", "qty_requested": 3, "price": "19.99"},
+                {"item_sku": "SKU-002", "qty_requested": 1, "price": "49.99"}
+            ]
+        }
+        """
+        serializer = FulfilmentOrderSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        try:
+            warehouse = Warehouse.objects.get(id=data["warehouse_id"])
+        except Warehouse.DoesNotExist:
+            return Response({"error": "Warehouse not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            owner = Company.objects.get(id=data["owner_id"])
+        except Company.DoesNotExist:
+            return Response({"error": "Owner (Company) not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Resolve all items upfront so we fail fast before touching the DB
+        resolved_lines = []
+        for line_data in data["lines"]:
+            try:
+                item = Item.objects.get(sku=line_data["item_sku"])
+            except Item.DoesNotExist:
+                return Response(
+                    {"error": f"Item not found: {line_data['item_sku']}"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            resolved_lines.append((item, line_data))
+
+        with transaction.atomic():
+            doc = Document.objects.create(
+                doc_number=data["doc_number"],
+                doc_type=Document.DocType.OUTBOUND_ORDER,
+                warehouse=warehouse,
+                owner=owner,
+                erp_doc_number=data.get("erp_doc_number", ""),
+                notes=data.get("notes", ""),
+                created_by=request.user,
+            )
+
+            for item, line_data in resolved_lines:
+                DocumentLine.objects.create(
+                    document=doc,
+                    item=item,
+                    qty_requested=line_data["qty_requested"],
+                    price=line_data.get("price"),
+                    discount_percent=line_data.get("discount_percent", 0),
+                    notes=line_data.get("notes", ""),
+                )
+
+            allocation_results = None
+            if data.get("reserve"):
+                allocation_results = doc.reserve_all_lines(
+                    strategy=data.get("strategy", "FIFO"),
+                    created_by=request.user,
+                )
+
+        response_data = {"document": DocumentSerializer(doc).data}
+        if allocation_results is not None:
+            response_data["allocation"] = allocation_results
+
+        return Response(response_data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])
     def add_line(self, request, pk=None):

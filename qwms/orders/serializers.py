@@ -143,3 +143,34 @@ class PickReservationSerializer(serializers.Serializer):
     """Serializer for picking a Reservation."""
 
     qty = serializers.IntegerField(required=False, allow_null=True)
+
+
+class FulfilmentLineSerializer(serializers.Serializer):
+    """A single line within a fulfilment order request."""
+
+    item_sku = serializers.CharField()
+    qty_requested = serializers.IntegerField(min_value=1)
+    price = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    discount_percent = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=0)
+    notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class FulfilmentOrderSerializer(serializers.Serializer):
+    """Create a Document with all its lines in one request.
+
+    Optionally auto-reserve stock by setting reserve=true.
+    """
+
+    doc_number = serializers.CharField(max_length=100)
+    warehouse_id = serializers.IntegerField()
+    owner_id = serializers.IntegerField()
+    erp_doc_number = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    notes = serializers.CharField(required=False, allow_blank=True, default="")
+    reserve = serializers.BooleanField(required=False, default=False)
+    strategy = serializers.ChoiceField(choices=["FIFO", "FEFO"], default="FIFO")
+    lines = FulfilmentLineSerializer(many=True)
+
+    def validate_lines(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one line is required.")
+        return value
