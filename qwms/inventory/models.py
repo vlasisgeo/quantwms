@@ -436,13 +436,9 @@ class Quant(TimeStampedModel):
         target_quant.qty += qty
         target_quant.save()
 
-        # Delete source if qty is now 0
-        if source.qty == 0:
-            source.delete()
-
-        # Log the movement
+        # Log the movement BEFORE deleting source (FK constraint)
         Movement.objects.create(
-            from_quant=self,
+            from_quant=source if source.qty > 0 else None,
             to_quant=target_quant,
             item=source.item,
             qty=qty,
@@ -451,6 +447,10 @@ class Quant(TimeStampedModel):
             created_by=created_by,
             reference="transfer_to_bin",
         )
+
+        # Delete source if qty is now 0
+        if source.qty == 0:
+            source.delete()
 
         return True
 
