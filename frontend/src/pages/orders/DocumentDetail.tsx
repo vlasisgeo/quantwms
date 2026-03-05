@@ -34,12 +34,17 @@ export default function DocumentDetail() {
     enabled: !!doc,
   })
 
+  const invalidateDoc = () => {
+    qc.invalidateQueries({ queryKey: ['document', docId] })
+    qc.invalidateQueries({ queryKey: ['picking', docId] })
+  }
+
   const reserveMutation = useMutation({
     mutationFn: () => documentsApi.reserve(docId),
     onSuccess: (data) => {
       setReserveResult(data.results)
       setReserveError(null)
-      qc.invalidateQueries({ queryKey: ['document', docId] })
+      invalidateDoc()
     },
     onError: (err: { response?: { data?: { error?: string } } }) => {
       setReserveError(err?.response?.data?.error ?? 'Reserve failed. Check stock levels.')
@@ -49,12 +54,12 @@ export default function DocumentDetail() {
 
   const cancelMutation = useMutation({
     mutationFn: () => documentsApi.cancel(docId),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['document', docId] }); navigate('/orders/documents') },
+    onSuccess: () => { invalidateDoc(); navigate('/orders/documents') },
   })
 
   const pickMutation = useMutation({
     mutationFn: (resId: number) => reservationsApi.pick(resId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['document', docId] }),
+    onSuccess: () => invalidateDoc(),
   })
 
   if (isLoading) return <div className="flex items-center justify-center h-64"><div className="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" /></div>
