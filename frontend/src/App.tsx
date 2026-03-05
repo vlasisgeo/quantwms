@@ -9,6 +9,7 @@ import ReceiveGoods from '@/pages/inventory/ReceiveGoods'
 import Movements from '@/pages/inventory/Movements'
 import StockCategories from '@/pages/inventory/StockCategories'
 import ItemDetail from '@/pages/inventory/ItemDetail'
+import MoveStock from '@/pages/inventory/MoveStock'
 import Documents from '@/pages/orders/Documents'
 import DocumentDetail from '@/pages/orders/DocumentDetail'
 import FulfilOrder from '@/pages/orders/FulfilOrder'
@@ -54,6 +55,7 @@ export default function App() {
         <Route path="inventory/receive" element={<ReceiveGoods />} />
         <Route path="inventory/movements" element={<Movements />} />
         <Route path="inventory/stock-categories" element={<StockCategories />} />
+        <Route path="inventory/move" element={<MoveStock />} />
 
         <Route path="orders/documents" element={<Documents />} />
         <Route path="orders/documents/:id" element={<DocumentDetail />} />

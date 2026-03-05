@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Package, Boxes, ArrowLeftRight, Building2,
   Warehouse, MapPin, Layers, FileText, ClipboardList, History,
-  Plug, Radio, Send, LogOut, ChevronDown, ChevronRight, BookOpen, Tag,
+  Plug, Radio, Send, LogOut, ChevronDown, ChevronRight, BookOpen, Tag, MoveRight,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
@@ -38,6 +38,7 @@ const groups: NavGroup[] = [
       { to: '/inventory/items', label: 'Items', icon: <Package className="h-4 w-4" /> },
       { to: '/inventory/stock', label: 'Stock', icon: <Boxes className="h-4 w-4" /> },
       { to: '/inventory/receive', label: 'Receive Goods', icon: <ArrowLeftRight className="h-4 w-4" /> },
+      { to: '/inventory/move', label: 'Move Stock', icon: <MoveRight className="h-4 w-4" /> },
       { to: '/inventory/movements', label: 'Movements', icon: <History className="h-4 w-4" /> },
       { to: '/inventory/stock-categories', label: 'Stock Categories', icon: <Tag className="h-4 w-4" /> },
     ],
