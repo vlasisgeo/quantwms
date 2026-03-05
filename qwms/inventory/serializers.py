@@ -91,7 +91,7 @@ class QuantSerializer(serializers.ModelSerializer):
     item_name = serializers.CharField(source="item.name", read_only=True)
     bin_location = serializers.CharField(source="bin.location_code", read_only=True)
     lot_code = serializers.CharField(source="lot.lot_code", read_only=True, allow_null=True)
-    warehouse_code = serializers.CharField(source="bin.warehouse.code", read_only=True)
+    bin_warehouse_code = serializers.CharField(source="bin.warehouse.code", read_only=True)
     owner_name = serializers.CharField(source="owner.name", read_only=True)
     qty_available = serializers.IntegerField(read_only=True)
 
@@ -104,7 +104,7 @@ class QuantSerializer(serializers.ModelSerializer):
             "item_name",
             "bin",
             "bin_location",
-            "warehouse_code",
+            "bin_warehouse_code",
             "lot",
             "lot_code",
             "stock_category",
