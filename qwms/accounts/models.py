@@ -47,3 +47,41 @@ class WarehouseAssignment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user} -> {self.warehouse} (manage={self.can_manage})"
+
+
+class CompanyWebhook(models.Model):
+    """A URL that receives HTTP POST callbacks when WMS events occur.
+
+    Register one or more URLs per company.  The ``event_types`` list
+    controls which events trigger a delivery.
+
+    Supported event types:
+        fulfil.success   — all lines fully allocated
+        fulfil.partial   — some lines could not be allocated
+        fulfil.failed    — document creation or reservation failed entirely
+    """
+
+    EVENT_FULFIL_SUCCESS = "fulfil.success"
+    EVENT_FULFIL_PARTIAL = "fulfil.partial"
+    EVENT_FULFIL_FAILED = "fulfil.failed"
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="webhooks")
+    url = models.URLField(max_length=500)
+    event_types = models.JSONField(
+        default=list,
+        help_text='JSON list, e.g. ["fulfil.success","fulfil.partial","fulfil.failed"]',
+    )
+    active = models.BooleanField(default=True)
+    secret = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Optional HMAC-SHA256 secret.  Signature sent as X-WMS-Signature header.",
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Company Webhook"
+        verbose_name_plural = "Company Webhooks"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.company} → {self.url}"

@@ -1,7 +1,7 @@
 """Serializers for orders app (Document, DocumentLine, Reservation)."""
 
 from rest_framework import serializers
-from orders.models import Document, DocumentLine, Reservation
+from orders.models import Document, DocumentLine, Reservation, FulfilmentLog
 
 
 class DocumentLineSerializer(serializers.ModelSerializer):
@@ -174,3 +174,30 @@ class FulfilmentOrderSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("At least one line is required.")
         return value
+
+
+class FulfilmentLogSerializer(serializers.ModelSerializer):
+    """Read-only serializer for FulfilmentLog."""
+
+    owner_name = serializers.CharField(source="owner.name", read_only=True, allow_null=True)
+    requested_by_username = serializers.CharField(
+        source="requested_by.username", read_only=True, allow_null=True
+    )
+
+    class Meta:
+        model = FulfilmentLog
+        fields = [
+            "id",
+            "document",
+            "doc_number",
+            "owner",
+            "owner_name",
+            "status",
+            "requested_by",
+            "requested_by_username",
+            "allocation_results",
+            "error_message",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields

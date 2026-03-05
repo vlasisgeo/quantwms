@@ -20,7 +20,8 @@ from inventory.views import (
     QuantViewSet,
     MovementViewSet,
 )
-from orders.views import DocumentViewSet, DocumentLineViewSet, ReservationViewSet
+from orders.views import DocumentViewSet, DocumentLineViewSet, ReservationViewSet, FulfilmentLogViewSet
+from accounts.views import CompanyWebhookViewSet
 from django.urls import include, path as _path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
@@ -47,6 +48,10 @@ router.register(r"movements", MovementViewSet, basename="movement")
 router.register(r"documents", DocumentViewSet, basename="document")
 router.register(r"document-lines", DocumentLineViewSet, basename="document-line")
 router.register(r"reservations", ReservationViewSet, basename="reservation")
+router.register(r"fulfilment-logs", FulfilmentLogViewSet, basename="fulfilment-log")
+
+# Accounts
+router.register(r"webhooks", CompanyWebhookViewSet, basename="webhook")
 
 urlpatterns = [
     # Router URLs

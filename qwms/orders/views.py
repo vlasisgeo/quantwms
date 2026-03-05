@@ -7,7 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import F
 
-from orders.models import Document, DocumentLine, Reservation
+from orders.models import Document, DocumentLine, Reservation, FulfilmentLog
 from orders.serializers import (
     DocumentSerializer,
     DocumentLineSerializer,
@@ -17,7 +17,9 @@ from orders.serializers import (
     ReserveDocumentSerializer,
     PickReservationSerializer,
     FulfilmentOrderSerializer,
+    FulfilmentLogSerializer,
 )
+from orders.utils import fire_webhooks
 from inventory.models import Item
 from core.models import Warehouse, Company
 
@@ -134,11 +136,18 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 {"item_sku": "SKU-002", "qty_requested": 1, "price": "49.99"}
             ]
         }
+
+        Every attempt — success or failure — is recorded in FulfilmentLog.
+        Active CompanyWebhook entries receive an HTTP POST with event type:
+          fulfil.success  — all lines fully allocated
+          fulfil.partial  — some lines could not be allocated
+          fulfil.failed   — document/reservation raised an error
         """
         serializer = FulfilmentOrderSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        # --- resolve warehouse / owner before touching the log ---
         try:
             warehouse = Warehouse.objects.get(id=data["warehouse_id"])
         except Warehouse.DoesNotExist:
@@ -149,47 +158,109 @@ class DocumentViewSet(viewsets.ModelViewSet):
         except Company.DoesNotExist:
             return Response({"error": "Owner (Company) not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Resolve all items upfront so we fail fast before touching the DB
+        # --- create the audit log entry (PENDING) ---
+        log = FulfilmentLog.objects.create(
+            doc_number=data["doc_number"],
+            owner=owner,
+            status=FulfilmentLog.LogStatus.PENDING,
+            requested_by=request.user,
+        )
+
+        # --- resolve all items upfront so we fail fast before touching the DB ---
         resolved_lines = []
         for line_data in data["lines"]:
             try:
                 item = Item.objects.get(sku=line_data["item_sku"])
             except Item.DoesNotExist:
-                return Response(
-                    {"error": f"Item not found: {line_data['item_sku']}"},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
+                error_msg = f"Item not found: {line_data['item_sku']}"
+                log.status = FulfilmentLog.LogStatus.FAILED
+                log.error_message = error_msg
+                log.save()
+                fire_webhooks(owner, "fulfil.failed", {
+                    "event": "fulfil.failed",
+                    "doc_number": data["doc_number"],
+                    "error": error_msg,
+                    "log_id": log.id,
+                })
+                return Response({"error": error_msg}, status=status.HTTP_404_NOT_FOUND)
             resolved_lines.append((item, line_data))
 
-        with transaction.atomic():
-            doc = Document.objects.create(
-                doc_number=data["doc_number"],
-                doc_type=Document.DocType.OUTBOUND_ORDER,
-                warehouse=warehouse,
-                owner=owner,
-                erp_doc_number=data.get("erp_doc_number", ""),
-                notes=data.get("notes", ""),
-                created_by=request.user,
-            )
-
-            for item, line_data in resolved_lines:
-                DocumentLine.objects.create(
-                    document=doc,
-                    item=item,
-                    qty_requested=line_data["qty_requested"],
-                    price=line_data.get("price"),
-                    discount_percent=line_data.get("discount_percent", 0),
-                    notes=line_data.get("notes", ""),
-                )
-
-            allocation_results = None
-            if data.get("reserve"):
-                allocation_results = doc.reserve_all_lines(
-                    strategy=data.get("strategy", "FIFO"),
+        # --- atomic document + line creation ---
+        try:
+            with transaction.atomic():
+                doc = Document.objects.create(
+                    doc_number=data["doc_number"],
+                    doc_type=Document.DocType.OUTBOUND_ORDER,
+                    warehouse=warehouse,
+                    owner=owner,
+                    erp_doc_number=data.get("erp_doc_number", ""),
+                    notes=data.get("notes", ""),
                     created_by=request.user,
                 )
 
-        response_data = {"document": DocumentSerializer(doc).data}
+                for item, line_data in resolved_lines:
+                    DocumentLine.objects.create(
+                        document=doc,
+                        item=item,
+                        qty_requested=line_data["qty_requested"],
+                        price=line_data.get("price"),
+                        discount_percent=line_data.get("discount_percent", 0),
+                        notes=line_data.get("notes", ""),
+                    )
+
+                allocation_results = None
+                if data.get("reserve"):
+                    allocation_results = doc.reserve_all_lines(
+                        strategy=data.get("strategy", "FIFO"),
+                        created_by=request.user,
+                    )
+
+        except Exception as exc:
+            error_msg = str(exc)
+            log.status = FulfilmentLog.LogStatus.FAILED
+            log.error_message = error_msg
+            log.save()
+            fire_webhooks(owner, "fulfil.failed", {
+                "event": "fulfil.failed",
+                "doc_number": data["doc_number"],
+                "error": error_msg,
+                "log_id": log.id,
+            })
+            return Response({"error": error_msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        # --- determine overall allocation status ---
+        if allocation_results is not None:
+            unallocated = allocation_results.get("unallocated_lines", [])
+            partial = allocation_results.get("partially_allocated_lines", [])
+            if unallocated or partial:
+                log_status = FulfilmentLog.LogStatus.PARTIAL
+                event_type = "fulfil.partial"
+            else:
+                log_status = FulfilmentLog.LogStatus.SUCCESS
+                event_type = "fulfil.success"
+        else:
+            # reserve=false — document created, no allocation attempted
+            log_status = FulfilmentLog.LogStatus.SUCCESS
+            event_type = "fulfil.success"
+
+        log.document = doc
+        log.status = log_status
+        log.allocation_results = allocation_results
+        log.save()
+
+        webhook_payload = {
+            "event": event_type,
+            "doc_number": doc.doc_number,
+            "erp_doc_number": doc.erp_doc_number,
+            "log_id": log.id,
+            "allocation": allocation_results,
+        }
+        fire_webhooks(owner, event_type, webhook_payload)
+
+        response_data = {
+            "document": DocumentSerializer(doc).data,
+            "log_id": log.id,
+        }
         if allocation_results is not None:
             response_data["allocation"] = allocation_results
 
@@ -449,3 +520,31 @@ class ReservationViewSet(viewsets.ModelViewSet):
         reservation.unreserve(created_by=request.user)
 
         return Response({"status": "unreserved"}, status=status.HTTP_200_OK)
+
+
+class FulfilmentLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only viewset for FulfilmentLog entries.
+
+    Warehouse staff (is_staff) see all logs.
+    Company members see only logs for their companies.
+    """
+
+    queryset = FulfilmentLog.objects.select_related("document", "owner", "requested_by")
+    serializer_class = FulfilmentLogSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ["owner", "status", "document"]
+    search_fields = ["doc_number"]
+    ordering_fields = ["created_at", "status"]
+    ordering = ["-created_at"]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = FulfilmentLog.objects.select_related("document", "owner", "requested_by")
+
+        if user.is_staff:
+            return qs
+
+        from core.models import get_user_companies
+
+        companies = get_user_companies(user)
+        return qs.filter(owner__in=companies).distinct()

@@ -418,3 +418,51 @@ class Reservation(TimeStampedModel):
 
         self.delete()
 
+
+class FulfilmentLog(TimeStampedModel):
+    """Audit record for every POST /api/documents/fulfil/ attempt.
+
+    Lets warehouse staff, company owners, and clients see what happened
+    when a fulfilment order was submitted — including partial allocations
+    and outright failures.
+    """
+
+    class LogStatus(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        SUCCESS = "SUCCESS", "Success (fully allocated)"
+        PARTIAL = "PARTIAL", "Partial (some lines unallocated)"
+        FAILED = "FAILED", "Failed"
+
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="fulfilment_logs",
+        help_text="Created document (null if creation itself failed)",
+    )
+    doc_number = models.CharField(max_length=100, blank=True, help_text="Attempted doc_number")
+    owner = models.ForeignKey(
+        Company,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="fulfilment_logs",
+    )
+    status = models.CharField(max_length=20, choices=LogStatus.choices, default=LogStatus.PENDING)
+    requested_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    allocation_results = models.JSONField(null=True, blank=True)
+    error_message = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "Fulfilment Log"
+        verbose_name_plural = "Fulfilment Logs"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["owner", "-created_at"]),
+            models.Index(fields=["status"]),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"FulfilmentLog({self.doc_number}, {self.status})"
+
