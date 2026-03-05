@@ -106,7 +106,7 @@ export const documentsApi = {
   fulfil: (data: unknown) => post<{ document: Document; allocation?: unknown; log_id: number }>('/documents/fulfil/', data),
   addLine: (id: number, data: unknown) => post<DocumentLine>(`/documents/${id}/add_line/`, data),
   reserve: (id: number, strategy?: string) =>
-    post<unknown>(`/documents/${id}/reserve/`, { strategy: strategy ?? 'FIFO' }),
+    post<{ status: string; results: { allocated_lines: number[]; partially_allocated_lines: { line_id: number; allocated: number; requested: number }[]; unallocated_lines: number[] }; document: unknown }>(`/documents/${id}/reserve/`, { strategy: strategy ?? 'FIFO' }),
   cancel: (id: number) => post<unknown>(`/documents/${id}/cancel/`),
   pickingList: (id: number) => get<unknown>(`/documents/${id}/picking_list/`),
 }

@@ -1,6 +1,7 @@
+import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Package, CheckCircle2, XCircle, Zap } from 'lucide-react'
+import { ArrowLeft, Package, CheckCircle2, XCircle, Zap, AlertTriangle } from 'lucide-react'
 import { documentsApi, reservationsApi } from '@/api'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -8,11 +9,19 @@ import { Badge } from '@/components/ui/Badge'
 import { Table } from '@/components/ui/Table'
 import { DOC_STATUS_LABELS, DOC_STATUS_COLORS, DOC_TYPE_LABELS, formatDate } from '@/lib/utils'
 
+interface ReserveResult {
+  allocated_lines: number[]
+  partially_allocated_lines: { line_id: number; allocated: number; requested: number }[]
+  unallocated_lines: number[]
+}
+
 export default function DocumentDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const qc = useQueryClient()
   const docId = Number(id)
+  const [reserveResult, setReserveResult] = useState<ReserveResult | null>(null)
+  const [reserveError, setReserveError] = useState<string | null>(null)
 
   const { data: doc, isLoading } = useQuery({
     queryKey: ['document', docId],
@@ -27,7 +36,15 @@ export default function DocumentDetail() {
 
   const reserveMutation = useMutation({
     mutationFn: () => documentsApi.reserve(docId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['document', docId] }),
+    onSuccess: (data) => {
+      setReserveResult(data.results)
+      setReserveError(null)
+      qc.invalidateQueries({ queryKey: ['document', docId] })
+    },
+    onError: (err: { response?: { data?: { error?: string } } }) => {
+      setReserveError(err?.response?.data?.error ?? 'Reserve failed. Check stock levels.')
+      setReserveResult(null)
+    },
   })
 
   const cancelMutation = useMutation({
@@ -75,6 +92,30 @@ export default function DocumentDetail() {
           )}
         </div>
       </div>
+
+      {/* Reserve feedback */}
+      {reserveError && (
+        <div className="mb-4 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>{reserveError}</span>
+          <button className="ml-auto text-red-400 hover:text-red-600" onClick={() => setReserveError(null)}>✕</button>
+        </div>
+      )}
+      {reserveResult && (
+        <div className={`mb-4 flex items-start gap-3 rounded-lg border px-4 py-3 text-sm ${
+          reserveResult.unallocated_lines.length > 0
+            ? 'border-amber-200 bg-amber-50 text-amber-700'
+            : 'border-green-200 bg-green-50 text-green-700'
+        }`}>
+          <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            {reserveResult.allocated_lines.length} line{reserveResult.allocated_lines.length !== 1 ? 's' : ''} fully allocated
+            {reserveResult.partially_allocated_lines.length > 0 && `, ${reserveResult.partially_allocated_lines.length} partial`}
+            {reserveResult.unallocated_lines.length > 0 && `, ${reserveResult.unallocated_lines.length} unallocated (insufficient stock)`}
+          </span>
+          <button className="ml-auto opacity-60 hover:opacity-100" onClick={() => setReserveResult(null)}>✕</button>
+        </div>
+      )}
 
       {/* Summary */}
       <div className="grid grid-cols-4 gap-4 mb-6">
