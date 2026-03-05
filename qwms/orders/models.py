@@ -240,10 +240,11 @@ class DocumentLine(TimeStampedModel):
         Returns:
             total qty allocated to this line
         """
-        if self.qty_remaining <= 0:
+        qty_to_allocate = self.qty_requested - self.qty_allocated
+        if qty_to_allocate <= 0:
             return 0
 
-        remaining_to_allocate = self.qty_remaining
+        remaining_to_allocate = qty_to_allocate
         warehouse = self.document.warehouse
 
         # Get candidate quants (available, not expired, unrestricted or specified category)
