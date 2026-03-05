@@ -39,3 +39,4 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+qwms/erp_connector/__pycache__/models.cpython-312.pyc
