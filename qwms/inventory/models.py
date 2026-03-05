@@ -129,9 +129,13 @@ class StockCategory(models.Model):
         (CONSIGNMENT, "Consignment"),
     ]
 
-    code = models.CharField(max_length=50, primary_key=True, choices=CATEGORY_CHOICES)
+    code = models.CharField(max_length=50, primary_key=True)
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
+    allocatable = models.BooleanField(
+        default=True,
+        help_text="Whether stock in this category can be allocated to orders.",
+    )
 
     class Meta:
         verbose_name = "Stock Category"

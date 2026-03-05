@@ -81,7 +81,7 @@ class StockCategorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = StockCategory
-        fields = ["code", "name", "description"]
+        fields = ["code", "name", "description", "allocatable"]
 
 
 class QuantSerializer(serializers.ModelSerializer):

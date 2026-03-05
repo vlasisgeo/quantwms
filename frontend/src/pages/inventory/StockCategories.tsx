@@ -8,6 +8,7 @@ import { stockCategoriesApi } from '@/api'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { Badge } from '@/components/ui/Badge'
 import { Table } from '@/components/ui/Table'
 import { Modal } from '@/components/ui/Modal'
 import { useAuth } from '@/context/AuthContext'
@@ -17,6 +18,7 @@ const schema = z.object({
   code: z.string().min(1, 'Code is required'),
   name: z.string().min(1, 'Name is required'),
   description: z.string().optional(),
+  allocatable: z.boolean().default(true),
 })
 type FormData = z.infer<typeof schema>
 
@@ -52,12 +54,12 @@ export default function StockCategories() {
   })
 
   function openCreate() {
-    reset({ code: '', name: '', description: '' })
+    reset({ code: '', name: '', description: '', allocatable: true })
     setModal('create')
   }
 
   function openEdit(sc: StockCategory) {
-    reset({ code: sc.code, name: sc.name, description: sc.description })
+    reset({ code: sc.code, name: sc.name, description: sc.description, allocatable: sc.allocatable })
     setModal(sc)
   }
 
@@ -65,7 +67,7 @@ export default function StockCategories() {
     if (modal === 'create') {
       createMutation.mutate(d)
     } else if (modal && typeof modal === 'object') {
-      updateMutation.mutate({ code: modal.code, name: d.name, description: d.description })
+      updateMutation.mutate({ code: modal.code, name: d.name, description: d.description, allocatable: d.allocatable })
     }
   }
 
@@ -99,6 +101,7 @@ export default function StockCategories() {
               { key: 'code', header: 'Code', render: (r: StockCategory) => <span className="font-mono font-medium">{r.code}</span> },
               { key: 'name', header: 'Name' },
               { key: 'description', header: 'Description', render: (r: StockCategory) => r.description || '—' },
+              { key: 'allocatable', header: 'Allocatable', render: (r: StockCategory) => r.allocatable ? <Badge label="Yes" className="bg-green-100 text-green-700" /> : <Badge label="No" className="bg-slate-100 text-slate-500" /> },
             ]}
           />
         </CardContent>
@@ -131,6 +134,10 @@ export default function StockCategories() {
             placeholder="Standard usable stock"
             {...register('description')}
           />
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input type="checkbox" {...register('allocatable')} className="rounded" />
+            Allocatable (can be reserved for orders)
+          </label>
           <div className="flex items-center justify-between pt-2">
             {isEdit && (
               <Button

@@ -252,7 +252,7 @@ class DocumentLine(TimeStampedModel):
         quants = Quant.objects.filter(
             item=self.item,
             bin__warehouse=warehouse,
-            stock_category=StockCategory.UNRESTRICTED,
+            stock_category__allocatable=True,
             owner=self.document.owner,
         ).select_for_update()
 

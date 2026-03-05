@@ -95,6 +95,7 @@ export interface StockCategory {
   code: string
   name: string
   description: string
+  allocatable: boolean
 }
 
 export interface Quant {
