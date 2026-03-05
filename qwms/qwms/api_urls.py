@@ -3,6 +3,22 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def me_view(request):
+    """Return basic info about the authenticated user."""
+    user = request.user
+    return Response({
+        'id': user.pk,
+        'username': user.username,
+        'email': user.email,
+        'is_staff': user.is_staff,
+    })
 
 from core.views import (
     CompanyViewSet,
@@ -59,6 +75,7 @@ urlpatterns = [
     # JWT Auth
     path("auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("auth/me/", me_view, name="auth-me"),
     _path('erp/', include('erp_connector.urls')),
     # OpenAPI / Swagger / Redoc
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
