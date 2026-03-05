@@ -45,6 +45,7 @@ export const warehousesApi = {
 export const sectionsApi = {
   list: (params?: Params) => list<Section>('/sections/', params),
   create: (data: Partial<Section>) => post<Section>('/sections/', data),
+  update: (id: number, data: Partial<Section>) => patch<Section>(`/sections/${id}/`, data),
 }
 
 export const binsApi = {

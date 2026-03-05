@@ -14,6 +14,7 @@ import FulfilmentLogs from '@/pages/orders/FulfilmentLogs'
 import Companies from '@/pages/warehouse/Companies'
 import Warehouses from '@/pages/warehouse/Warehouses'
 import Bins from '@/pages/warehouse/Bins'
+import Sections from '@/pages/warehouse/Sections'
 import Integrations from '@/pages/erp/Integrations'
 import InboundEvents from '@/pages/erp/InboundEvents'
 import Deliveries from '@/pages/erp/Deliveries'
@@ -58,6 +59,7 @@ export default function App() {
         <Route path="warehouse/companies" element={<Companies />} />
         <Route path="warehouse/warehouses" element={<Warehouses />} />
         <Route path="warehouse/bins" element={<Bins />} />
+        <Route path="warehouse/sections" element={<Sections />} />
 
         <Route path="erp/integrations" element={<Integrations />} />
         <Route path="erp/events" element={<InboundEvents />} />

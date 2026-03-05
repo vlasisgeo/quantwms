@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Package, Boxes, ArrowLeftRight, Building2,
-  Warehouse, MapPin, FileText, ClipboardList, History,
+  Warehouse, MapPin, Layers, FileText, ClipboardList, History,
   Plug, Radio, Send, LogOut, ChevronDown, ChevronRight, BookOpen,
 } from 'lucide-react'
 import { useState } from 'react'
@@ -28,6 +28,7 @@ const groups: NavGroup[] = [
       { to: '/warehouse/companies', label: 'Companies', icon: <Building2 className="h-4 w-4" /> },
       { to: '/warehouse/warehouses', label: 'Warehouses', icon: <Warehouse className="h-4 w-4" /> },
       { to: '/warehouse/bins', label: 'Bins', icon: <MapPin className="h-4 w-4" /> },
+      { to: '/warehouse/sections', label: 'Sections', icon: <Layers className="h-4 w-4" /> },
     ],
   },
   {
