@@ -33,7 +33,9 @@ const MODES: { value: PutawayMode; label: string; desc: string }[] = [
 
 export default function ReceiveGoods() {
   const [success, setSuccess] = useState(false)
-  const [mode, setMode] = useState<PutawayMode>('manual')
+  const [mode, setMode] = useState<PutawayMode>(
+    () => (localStorage.getItem('putaway-mode') as PutawayMode | null) ?? 'manual'
+  )
   const [binInput, setBinInput] = useState('')
 
   const { data: bins }      = useQuery({ queryKey: ['bins-all'],   queryFn: () => binsApi.list({ page_size: 500 }) })
@@ -113,6 +115,7 @@ export default function ReceiveGoods() {
 
   const handleModeChange = (newMode: PutawayMode) => {
     setMode(newMode)
+    localStorage.setItem('putaway-mode', newMode)
     setBinInput('')
     setValue('bin_id', 0 as unknown as number)
   }
@@ -189,6 +192,9 @@ export default function ReceiveGoods() {
                   >
                     <p className="font-medium">{m.label}</p>
                     <p className="text-xs opacity-70">{m.desc}</p>
+                    {mode === m.value && (
+                      <p className="mt-0.5 text-xs text-primary-500 font-medium">✓ default</p>
+                    )}
                   </button>
                 ))}
               </div>
