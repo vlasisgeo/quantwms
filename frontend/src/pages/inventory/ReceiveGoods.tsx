@@ -76,6 +76,13 @@ export default function ReceiveGoods() {
     return activeBins
   })()
 
+  // Top-3 best-fit suggestions: bins sorted by tightest fit (ascending remaining volume)
+  const fitSuggestions: Bin[] = mode === 'fits' && selectedItem && itemVolume > 0 && Number(selectedQty) > 0
+    ? [...filteredBins]
+        .sort((a, b) => a.remaining_volume_mm3 - b.remaining_volume_mm3)
+        .slice(0, 3)
+    : []
+
   // bin id → total available qty for this item (consolidate mode label)
   const binQtyMap = new Map<number, number>()
   if (mode === 'consolidate') {
@@ -186,6 +193,51 @@ export default function ReceiveGoods() {
                 ))}
               </div>
             </div>
+
+            {/* Fits mode — top-3 suggestions */}
+            {fitSuggestions.length > 0 && !resolvedBin && (
+              <div>
+                <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-slate-400">
+                  Suggested bins (best fit)
+                </p>
+                <div className="flex gap-2">
+                  {fitSuggestions.map((b, i) => {
+                    const pctUsed = b.bin_volume_mm3 > 0
+                      ? Math.round(((b.bin_volume_mm3 - b.remaining_volume_mm3) / b.bin_volume_mm3) * 100)
+                      : 0
+                    const pctAfter = b.bin_volume_mm3 > 0
+                      ? Math.round(((b.used_volume_mm3 + itemVolume * Number(selectedQty)) / b.bin_volume_mm3) * 100)
+                      : 0
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => setBinInput(b.location_code)}
+                        className="flex-1 rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-left text-sm hover:border-primary-400 hover:bg-primary-100 transition-colors"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-medium text-primary-800">{b.location_code}</span>
+                          <span className="text-xs text-primary-500">#{i + 1}</span>
+                        </div>
+                        {b.warehouse_code && (
+                          <p className="text-xs text-primary-600 mb-1.5">{b.warehouse_code}</p>
+                        )}
+                        {/* fill bar */}
+                        <div className="h-1.5 w-full rounded-full bg-primary-200 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-primary-500 transition-all"
+                            style={{ width: `${Math.min(pctAfter, 100)}%` }}
+                          />
+                        </div>
+                        <p className="mt-1 text-xs text-primary-600">
+                          {b.remaining_volume_mm3.toLocaleString()} mm³ free · {pctUsed}% → {pctAfter}%
+                        </p>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Bin — scan barcode or type location code */}
             <div className="space-y-1">
