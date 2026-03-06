@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Search, Grid3X3, Trash2, PowerOff } from 'lucide-react'
+import { Plus, Search, Grid3X3, Trash2, PowerOff, Pencil } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -21,6 +21,16 @@ const singleSchema = z.object({
   location_code: z.string().min(1),
   bin_type: z.coerce.number().optional(),
 })
+
+const editSchema = z.object({
+  location_code: z.string().min(1),
+  warehouse: z.coerce.number().min(1),
+  section: z.coerce.number().min(1),
+  bin_type: z.coerce.number().optional(),
+  note: z.string().optional(),
+  active: z.boolean().default(true),
+})
+type EditForm = z.infer<typeof editSchema>
 type SingleForm = z.infer<typeof singleSchema>
 
 const massSchema = z.object({
@@ -43,7 +53,8 @@ export default function Bins() {
   const qc = useQueryClient()
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
-  const [modalType, setModalType] = useState<null | 'single' | 'mass' | 'confirmDelete'>(null)
+  const [modalType, setModalType] = useState<null | 'single' | 'mass' | 'confirmDelete' | 'edit'>(null)
+  const [editingBin, setEditingBin] = useState<Bin | null>(null)
   const [selected, setSelected] = useState<Set<number>>(new Set())
 
   const { data, isLoading } = useQuery({
@@ -80,8 +91,27 @@ export default function Bins() {
     },
   })
 
+  const editMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Partial<Bin> }) => binsApi.patch(id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bins'] }); setModalType(null); setEditingBin(null) },
+  })
+
   const singleForm = useForm<SingleForm>({ resolver: zodResolver(singleSchema) })
-  const massForm = useForm<MassForm>({ resolver: zodResolver(massSchema), defaultValues: { format: '{aisle}-{bay}-{level}', pad_aisle: 2, pad_bay: 2, pad_level: 1 } })
+  const massForm   = useForm<MassForm>({ resolver: zodResolver(massSchema), defaultValues: { format: '{aisle}-{bay}-{level}', pad_aisle: 2, pad_bay: 2, pad_level: 1 } })
+  const editForm   = useForm<EditForm>({ resolver: zodResolver(editSchema) })
+
+  function openEdit(bin: Bin) {
+    editForm.reset({
+      location_code: bin.location_code,
+      warehouse: bin.warehouse,
+      section: bin.section ?? undefined,
+      bin_type: bin.bin_type ?? undefined,
+      note: bin.note,
+      active: bin.active,
+    })
+    setEditingBin(bin)
+    setModalType('edit')
+  }
 
   const totalPages = Math.ceil((data?.count ?? 0) / PAGE_SIZE)
   const pageResults: Bin[] = data?.results ?? []
@@ -208,6 +238,20 @@ export default function Bins() {
               { key: 'bin_type_name', header: 'Bin Type', render: (r: Bin) => r.bin_type_name ? <span className="text-xs font-medium text-slate-600">{r.bin_type_name}</span> : <span className="text-slate-300">—</span> },
               { key: 'quants_count', header: 'Stock', render: (r: Bin) => r.quants_count > 0 ? <span className="font-medium text-amber-600">{r.quants_count}</span> : <span className="text-slate-400">0</span> },
               { key: 'active', header: 'Active', render: (r: Bin) => r.active ? '✅' : '—' },
+              {
+                key: 'edit',
+                header: '',
+                className: 'w-10',
+                render: (r: Bin) => (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openEdit(r) }}
+                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    title="Edit"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                ),
+              },
             ]}
           />
           <Pagination page={page} totalPages={totalPages} onPage={setPage} />
@@ -252,6 +296,46 @@ export default function Bins() {
             Delete {selected.size} bin{selected.size !== 1 ? 's' : ''}
           </Button>
         </div>
+      </Modal>
+
+      {/* Edit bin modal */}
+      <Modal open={modalType === 'edit'} onClose={() => { setModalType(null); setEditingBin(null) }} title={`Edit Bin: ${editingBin?.location_code ?? ''}`}>
+        <form
+          onSubmit={editForm.handleSubmit((d) => editMutation.mutate({ id: editingBin!.id, data: d }))}
+          className="space-y-4"
+        >
+          <Input
+            label="Location Code"
+            error={editForm.formState.errors.location_code?.message}
+            {...editForm.register('location_code')}
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <Select label="Warehouse" {...editForm.register('warehouse')}>
+              <option value="">Select…</option>
+              {warehouses?.results.map((w) => <option key={w.id} value={w.id}>{w.code}</option>)}
+            </Select>
+            <Select label="Section" {...editForm.register('section')}>
+              <option value="">Select…</option>
+              {sections?.results.map((s) => <option key={s.id} value={s.id}>{s.code}</option>)}
+            </Select>
+          </div>
+          <Select label="Bin Type (optional)" {...editForm.register('bin_type')}>
+            <option value="">None</option>
+            {binTypes?.results.map((bt) => <option key={bt.id} value={bt.id}>{bt.name}</option>)}
+          </Select>
+          <Input label="Note" {...editForm.register('note')} />
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" className="rounded" {...editForm.register('active')} />
+            Active
+          </label>
+          {editMutation.isError && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">Save failed</p>
+          )}
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="secondary" onClick={() => { setModalType(null); setEditingBin(null) }}>Cancel</Button>
+            <Button type="submit" loading={editMutation.isPending}>Save</Button>
+          </div>
+        </form>
       </Modal>
 
       {/* Mass create modal */}
