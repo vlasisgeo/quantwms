@@ -42,6 +42,11 @@ export interface BinType {
   id: number
   name: string
   description: string
+  x_mm: number
+  y_mm: number
+  z_mm: number
+  max_weight_grams: number
+  static: boolean
   active: boolean
 }
 
@@ -54,6 +59,7 @@ export interface Bin {
   section: number | null
   section_code?: string | null
   bin_type: number | null
+  bin_type_name?: string | null
   active: boolean
   note: string
   quants_count: number

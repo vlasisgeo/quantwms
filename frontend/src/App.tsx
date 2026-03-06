@@ -18,6 +18,7 @@ import Companies from '@/pages/warehouse/Companies'
 import Warehouses from '@/pages/warehouse/Warehouses'
 import Bins from '@/pages/warehouse/Bins'
 import Sections from '@/pages/warehouse/Sections'
+import BinTypes from '@/pages/warehouse/BinTypes'
 import Integrations from '@/pages/erp/Integrations'
 import InboundEvents from '@/pages/erp/InboundEvents'
 import Deliveries from '@/pages/erp/Deliveries'
@@ -66,6 +67,7 @@ export default function App() {
         <Route path="warehouse/warehouses" element={<Warehouses />} />
         <Route path="warehouse/bins" element={<Bins />} />
         <Route path="warehouse/sections" element={<Sections />} />
+        <Route path="warehouse/bin-types" element={<BinTypes />} />
 
         <Route path="erp/integrations" element={<Integrations />} />
         <Route path="erp/events" element={<InboundEvents />} />

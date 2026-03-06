@@ -4,7 +4,7 @@ import { Plus, Search, Grid3X3, Trash2, PowerOff } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { binsApi, warehousesApi, sectionsApi } from '@/api'
+import { binsApi, warehousesApi, sectionsApi, binTypesApi } from '@/api'
 import api from '@/lib/api'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -19,6 +19,7 @@ const singleSchema = z.object({
   warehouse: z.coerce.number().min(1),
   section: z.coerce.number().min(1),
   location_code: z.string().min(1),
+  bin_type: z.coerce.number().optional(),
 })
 type SingleForm = z.infer<typeof singleSchema>
 
@@ -50,7 +51,8 @@ export default function Bins() {
     queryFn: () => binsApi.list({ page, search, page_size: PAGE_SIZE }),
   })
   const { data: warehouses } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehousesApi.list() })
-  const { data: sections } = useQuery({ queryKey: ['sections'], queryFn: () => sectionsApi.list() })
+  const { data: sections }   = useQuery({ queryKey: ['sections'],   queryFn: () => sectionsApi.list() })
+  const { data: binTypes }   = useQuery({ queryKey: ['bin-types'],  queryFn: () => binTypesApi.list() })
 
   const singleMutation = useMutation({
     mutationFn: binsApi.createLocation,
@@ -203,6 +205,7 @@ export default function Bins() {
               { key: 'location_code', header: 'Location Code', render: (r: Bin) => <span className="font-mono font-medium">{r.location_code}</span> },
               { key: 'warehouse_code', header: 'Warehouse' },
               { key: 'section_code', header: 'Section', render: (r: Bin) => r.section_code ?? '—' },
+              { key: 'bin_type_name', header: 'Bin Type', render: (r: Bin) => r.bin_type_name ? <span className="text-xs font-medium text-slate-600">{r.bin_type_name}</span> : <span className="text-slate-300">—</span> },
               { key: 'quants_count', header: 'Stock', render: (r: Bin) => r.quants_count > 0 ? <span className="font-medium text-amber-600">{r.quants_count}</span> : <span className="text-slate-400">0</span> },
               { key: 'active', header: 'Active', render: (r: Bin) => r.active ? '✅' : '—' },
             ]}
@@ -223,6 +226,10 @@ export default function Bins() {
             {sections?.results.map((s) => <option key={s.id} value={s.id}>{s.code}</option>)}
           </Select>
           <Input label="Location Code" placeholder="A-01-01" {...singleForm.register('location_code')} />
+          <Select label="Bin Type (optional)" {...singleForm.register('bin_type')}>
+            <option value="">None</option>
+            {binTypes?.results.map((bt) => <option key={bt.id} value={bt.id}>{bt.name}</option>)}
+          </Select>
           <div className="flex justify-end gap-3">
             <Button type="button" variant="secondary" onClick={() => setModalType(null)}>Cancel</Button>
             <Button type="submit" loading={singleMutation.isPending}>Create</Button>

@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Package, Boxes, ArrowLeftRight, Building2,
   Warehouse, MapPin, Layers, FileText, ClipboardList, History,
-  Plug, Radio, Send, LogOut, ChevronDown, ChevronRight, BookOpen, Tag, MoveRight,
+  Plug, Radio, Send, LogOut, ChevronDown, ChevronRight, BookOpen, Tag, MoveRight, Container,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
@@ -29,6 +29,7 @@ const groups: NavGroup[] = [
       { to: '/warehouse/warehouses', label: 'Warehouses', icon: <Warehouse className="h-4 w-4" /> },
       { to: '/warehouse/bins', label: 'Bins', icon: <MapPin className="h-4 w-4" /> },
       { to: '/warehouse/sections', label: 'Sections', icon: <Layers className="h-4 w-4" /> },
+      { to: '/warehouse/bin-types', label: 'Bin Types', icon: <Container className="h-4 w-4" /> },
     ],
   },
   {

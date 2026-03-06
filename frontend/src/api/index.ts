@@ -58,7 +58,10 @@ export const binsApi = {
 }
 
 export const binTypesApi = {
-  list: () => list<BinType>('/bin-types/'),
+  list: (params?: Params) => list<BinType>('/bin-types/', params),
+  create: (data: Partial<BinType>) => post<BinType>('/bin-types/', data),
+  update: (id: number, data: Partial<BinType>) => patch<BinType>(`/bin-types/${id}/`, data),
+  destroy: (id: number) => del(`/bin-types/${id}/`),
 }
 
 // ── Inventory ─────────────────────────────────────────────────────────────────
