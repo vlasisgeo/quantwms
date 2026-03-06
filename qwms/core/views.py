@@ -82,14 +82,48 @@ class BinTypeViewSet(viewsets.ModelViewSet):
 class BinViewSet(viewsets.ModelViewSet):
     """ViewSet for Bin (storage location)."""
 
-    queryset = Bin.objects.select_related("warehouse", "section", "bin_type").annotate(
-        quants_count=models.Count("quants", distinct=True)
-    )
+    queryset = Bin.objects.select_related("warehouse", "section", "bin_type")
     serializer_class = BinSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["warehouse", "section", "active"]
     search_fields = ["location_code"]
     ordering_fields = ["location_code", "warehouse__code", "section__code"]
+
+    def get_queryset(self):
+        from inventory.models import Quant
+        from django.db.models import F, Sum, ExpressionWrapper, IntegerField, Subquery, OuterRef
+        from django.db.models.functions import Coalesce
+
+        # Sum of (qty × length × width × height) for all quants in each bin
+        _used_vol = (
+            Quant.objects
+            .filter(bin=OuterRef("pk"))
+            .annotate(
+                unit_vol=ExpressionWrapper(
+                    F("qty") * F("item__length_mm") * F("item__width_mm") * F("item__height_mm"),
+                    output_field=IntegerField(),
+                )
+            )
+            .values("bin")
+            .annotate(total=Sum("unit_vol"))
+            .values("total")
+        )
+
+        return (
+            Bin.objects
+            .select_related("warehouse", "section", "bin_type")
+            .annotate(
+                quants_count=models.Count("quants", distinct=True),
+                bin_volume_mm3=Coalesce(
+                    ExpressionWrapper(
+                        F("bin_type__x_mm") * F("bin_type__y_mm") * F("bin_type__z_mm"),
+                        output_field=IntegerField(),
+                    ),
+                    0,
+                ),
+                used_volume_mm3=Coalesce(Subquery(_used_vol, output_field=IntegerField()), 0),
+            )
+        )
 
     @action(detail=True, methods=["get"])
     def inventory(self, request, pk=None):

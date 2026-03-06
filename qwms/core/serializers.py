@@ -86,6 +86,9 @@ class BinSerializer(serializers.ModelSerializer):
     bin_type_name = serializers.CharField(source="bin_type.name", read_only=True)
     label = serializers.SerializerMethodField()
     quants_count = serializers.IntegerField(read_only=True, default=0)
+    bin_volume_mm3 = serializers.IntegerField(read_only=True, default=0)
+    used_volume_mm3 = serializers.IntegerField(read_only=True, default=0)
+    remaining_volume_mm3 = serializers.SerializerMethodField()
 
     class Meta:
         model = Bin
@@ -103,6 +106,9 @@ class BinSerializer(serializers.ModelSerializer):
             "note",
             "label",
             "quants_count",
+            "bin_volume_mm3",
+            "used_volume_mm3",
+            "remaining_volume_mm3",
             "created_at",
             "updated_at",
         ]
@@ -112,6 +118,12 @@ class BinSerializer(serializers.ModelSerializer):
     def get_label(self, obj):
         """Return the bin label."""
         return obj.label
+
+    @extend_schema_field(serializers.IntegerField)
+    def get_remaining_volume_mm3(self, obj):
+        vol = getattr(obj, "bin_volume_mm3", None) or 0
+        used = getattr(obj, "used_volume_mm3", None) or 0
+        return max(0, vol - used)
 
 
 class LocationCreateSerializer(serializers.Serializer):

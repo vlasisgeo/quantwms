@@ -56,6 +56,9 @@ export interface Bin {
   active: boolean
   note: string
   quants_count: number
+  bin_volume_mm3: number
+  used_volume_mm3: number
+  remaining_volume_mm3: number
 }
 
 // ── Inventory ─────────────────────────────────────────────────────────────────

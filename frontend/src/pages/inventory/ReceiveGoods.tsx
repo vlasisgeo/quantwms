@@ -22,12 +22,13 @@ const schema = z.object({
 })
 type FormData = z.infer<typeof schema>
 
-type PutawayMode = 'manual' | 'consolidate' | 'empty'
+type PutawayMode = 'manual' | 'consolidate' | 'empty' | 'fits'
 
 const MODES: { value: PutawayMode; label: string; desc: string }[] = [
   { value: 'manual',      label: 'Manual',      desc: 'All active bins' },
   { value: 'consolidate', label: 'Consolidate', desc: 'Bins with this item' },
   { value: 'empty',       label: 'Empty',       desc: 'Bins with no stock' },
+  { value: 'fits',        label: 'Fits',        desc: 'Volume fits qty' },
 ]
 
 export default function ReceiveGoods() {
@@ -45,7 +46,11 @@ export default function ReceiveGoods() {
   })
 
   const selectedSku  = useWatch({ control, name: 'item_sku' })
+  const selectedQty  = useWatch({ control, name: 'qty' })
   const selectedItem = items?.results.find((i) => i.sku === selectedSku)
+  const itemVolume   = selectedItem
+    ? (selectedItem.length_mm ?? 0) * (selectedItem.width_mm ?? 0) * (selectedItem.height_mm ?? 0)
+    : 0
 
   const { data: itemQuants } = useQuery({
     queryKey: ['quants-for-item', selectedItem?.id],
@@ -56,11 +61,16 @@ export default function ReceiveGoods() {
   // Build filtered bin list based on putaway mode
   const activeBins = bins?.results.filter((b: Bin) => b.active) ?? []
   const filteredBins = (() => {
-    if (mode === 'empty')       return activeBins.filter((b: Bin) => b.quants_count === 0)
+    if (mode === 'empty') return activeBins.filter((b: Bin) => b.quants_count === 0)
     if (mode === 'consolidate') {
       if (!selectedItem) return []
       const binIds = new Set(itemQuants?.results.map((q: Quant) => q.bin) ?? [])
       return activeBins.filter((b: Bin) => binIds.has(b.id))
+    }
+    if (mode === 'fits') {
+      if (!selectedItem || itemVolume === 0) return []
+      const needed = itemVolume * (Number(selectedQty) || 0)
+      return activeBins.filter((b: Bin) => b.bin_volume_mm3 > 0 && b.remaining_volume_mm3 >= needed)
     }
     return activeBins
   })()
@@ -137,13 +147,16 @@ export default function ReceiveGoods() {
             {/* Bin — filtered per mode */}
             <Select label="Bin" id="bin_id" error={errors.bin_id?.message} {...register('bin_id')}>
               <option value="">
-                {mode === 'consolidate' && !selectedItem ? 'Select an item first…' : 'Select bin…'}
+                {(mode === 'consolidate' || mode === 'fits') && !selectedItem
+                  ? 'Select an item first…'
+                  : 'Select bin…'}
               </option>
               {filteredBins.map((b: Bin) => (
                 <option key={b.id} value={b.id}>
                   {b.location_code}
                   {b.warehouse_code ? ` (${b.warehouse_code})` : ''}
                   {mode === 'consolidate' && binQtyMap.has(b.id) ? ` · ${binQtyMap.get(b.id)} in stock` : ''}
+                  {mode === 'fits' && b.bin_volume_mm3 > 0 ? ` · ${b.remaining_volume_mm3.toLocaleString()} mm³ free` : ''}
                 </option>
               ))}
             </Select>
@@ -157,6 +170,16 @@ export default function ReceiveGoods() {
             {mode === 'empty' && filteredBins.length === 0 && (
               <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
                 No empty bins available.
+              </p>
+            )}
+            {mode === 'fits' && selectedItem && itemVolume === 0 && (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                This item has no dimensions set. Add length × width × height on the item to use this mode.
+              </p>
+            )}
+            {mode === 'fits' && selectedItem && itemVolume > 0 && filteredBins.length === 0 && (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                No bins can fit {Number(selectedQty) || 0} × this item ({itemVolume.toLocaleString()} mm³ each). Try <strong>Manual</strong>.
               </p>
             )}
 
