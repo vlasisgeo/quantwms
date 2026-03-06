@@ -98,20 +98,43 @@ export default function ReceiveGoods() {
     ? [...filteredBins].sort((a, b) => (binQtyMap.get(b.id) ?? 0) - (binQtyMap.get(a.id) ?? 0))
     : []
 
-  // Resolve bin from scan/type input
-  const resolvedBin: Bin | null = (() => {
-    const raw = binInput.trim()
-    if (!raw) return null
-    // Match location_code (case-insensitive)
-    const byLoc = activeBins.find((b: Bin) => b.location_code.toLowerCase() === raw.toLowerCase())
+  // Resolve bin — local first (already loaded), then backend fallback
+  const rawBinInput = binInput.trim()
+  const binUuidPart = rawBinInput.match(/^BIN-(.+)$/i)?.[1] ?? null
+
+  const localBin: Bin | null = (() => {
+    if (!rawBinInput) return null
+    const byLoc = activeBins.find((b: Bin) => b.location_code.toLowerCase() === rawBinInput.toLowerCase())
     if (byLoc) return byLoc
-    // Match BIN-{uuid} barcode format
-    const uuidMatch = raw.match(/^BIN-(.+)$/i)
-    if (uuidMatch) return activeBins.find((b: Bin) => b.code === uuidMatch[1]) ?? null
+    if (binUuidPart) return activeBins.find((b: Bin) => b.code === binUuidPart) ?? null
     return null
   })()
 
-  const binMatchesMode = resolvedBin ? filteredBins.some((b: Bin) => b.id === resolvedBin.id) : false
+  // Backend fallback: fires only when local lookup fails (bin beyond page_size limit)
+  const { data: remoteBinData } = useQuery({
+    queryKey: ['bin-lookup', rawBinInput],
+    queryFn: () => binUuidPart
+      ? binsApi.list({ code: binUuidPart, active: true, page_size: 1 })
+      : binsApi.list({ location_code: rawBinInput, active: true, page_size: 1 }),
+    enabled: !!rawBinInput && !localBin,
+    staleTime: 30_000,
+  })
+
+  const resolvedBin: Bin | null = localBin ?? remoteBinData?.results[0] ?? null
+
+  const binMatchesMode = resolvedBin ? (() => {
+    if (mode === 'manual') return true
+    if (mode === 'empty') return resolvedBin.quants_count === 0
+    if (mode === 'consolidate') {
+      const binIds = new Set(itemQuants?.results.map((q: Quant) => q.bin) ?? [])
+      return binIds.has(resolvedBin.id)
+    }
+    if (mode === 'fits') {
+      return resolvedBin.bin_volume_mm3 > 0 &&
+        resolvedBin.remaining_volume_mm3 >= itemVolume * (Number(selectedQty) || 0)
+    }
+    return false
+  })() : false
 
   // Sync bin_id form value whenever resolved bin changes
   useEffect(() => {

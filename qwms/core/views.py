@@ -85,7 +85,7 @@ class BinViewSet(viewsets.ModelViewSet):
     queryset = Bin.objects.select_related("warehouse", "section", "bin_type")
     serializer_class = BinSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ["warehouse", "section", "active"]
+    filterset_fields = ["warehouse", "section", "active", "location_code", "code"]
     search_fields = ["location_code"]
     ordering_fields = ["location_code", "warehouse__code", "section__code"]
 
