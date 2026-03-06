@@ -93,6 +93,11 @@ export default function ReceiveGoods() {
     }
   }
 
+  // Consolidate suggestions: bins that already hold this item, sorted by qty descending
+  const consolidateSuggestions: Bin[] = mode === 'consolidate' && selectedItem && filteredBins.length > 0
+    ? [...filteredBins].sort((a, b) => (binQtyMap.get(b.id) ?? 0) - (binQtyMap.get(a.id) ?? 0))
+    : []
+
   // Resolve bin from scan/type input
   const resolvedBin: Bin | null = (() => {
     const raw = binInput.trim()
@@ -199,6 +204,35 @@ export default function ReceiveGoods() {
                 ))}
               </div>
             </div>
+
+            {/* Consolidate mode — bins already holding this item */}
+            {consolidateSuggestions.length > 0 && !resolvedBin && (
+              <div>
+                <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-slate-400">
+                  Bins with this item
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  {consolidateSuggestions.map((b) => (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => setBinInput(b.location_code)}
+                      className="flex items-center gap-3 rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-left text-sm hover:border-primary-400 hover:bg-primary-100 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <span className="font-medium text-primary-800">{b.location_code}</span>
+                        {b.warehouse_code && (
+                          <span className="ml-2 text-xs text-primary-500">({b.warehouse_code})</span>
+                        )}
+                      </div>
+                      <span className="text-xs font-semibold text-primary-700 shrink-0">
+                        {binQtyMap.get(b.id) ?? 0} in stock
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Fits mode — top-3 suggestions */}
             {fitSuggestions.length > 0 && !resolvedBin && (
