@@ -47,6 +47,7 @@ export interface BinType {
 
 export interface Bin {
   id: number
+  code: string
   location_code: string
   warehouse: number
   warehouse_code?: string

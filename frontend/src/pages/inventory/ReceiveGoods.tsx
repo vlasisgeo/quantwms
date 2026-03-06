@@ -2,8 +2,8 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { CheckCircle2 } from 'lucide-react'
-import { useState } from 'react'
+import { CheckCircle2, ScanLine, Package } from 'lucide-react'
+import { useState, useEffect } from 'react'
 import { quantsApi, binsApi, itemsApi, companiesApi, stockCategoriesApi } from '@/api'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import { Input, Select, Textarea } from '@/components/ui/Input'
@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils'
 import type { Bin, Quant } from '@/types'
 
 const schema = z.object({
-  bin_id: z.coerce.number().min(1, 'Select a bin'),
+  bin_id: z.coerce.number().min(1, 'Scan or type a valid bin'),
   item_sku: z.string().min(1, 'SKU required'),
   qty: z.coerce.number().min(1, 'Qty must be ≥ 1'),
   lot_code: z.string().optional(),
@@ -34,6 +34,7 @@ const MODES: { value: PutawayMode; label: string; desc: string }[] = [
 export default function ReceiveGoods() {
   const [success, setSuccess] = useState(false)
   const [mode, setMode] = useState<PutawayMode>('manual')
+  const [binInput, setBinInput] = useState('')
 
   const { data: bins }      = useQuery({ queryKey: ['bins-all'],   queryFn: () => binsApi.list({ page_size: 500 }) })
   const { data: items }     = useQuery({ queryKey: ['items-all'],  queryFn: () => itemsApi.list({ page_size: 500 }) })
@@ -58,8 +59,8 @@ export default function ReceiveGoods() {
     enabled:  mode === 'consolidate' && !!selectedItem?.id,
   })
 
-  // Build filtered bin list based on putaway mode
   const activeBins = bins?.results.filter((b: Bin) => b.active) ?? []
+
   const filteredBins = (() => {
     if (mode === 'empty') return activeBins.filter((b: Bin) => b.quants_count === 0)
     if (mode === 'consolidate') {
@@ -83,15 +84,39 @@ export default function ReceiveGoods() {
     }
   }
 
+  // Resolve bin from scan/type input
+  const resolvedBin: Bin | null = (() => {
+    const raw = binInput.trim()
+    if (!raw) return null
+    // Match location_code (case-insensitive)
+    const byLoc = activeBins.find((b: Bin) => b.location_code.toLowerCase() === raw.toLowerCase())
+    if (byLoc) return byLoc
+    // Match BIN-{uuid} barcode format
+    const uuidMatch = raw.match(/^BIN-(.+)$/i)
+    if (uuidMatch) return activeBins.find((b: Bin) => b.code === uuidMatch[1]) ?? null
+    return null
+  })()
+
+  const binMatchesMode = resolvedBin ? filteredBins.some((b: Bin) => b.id === resolvedBin.id) : false
+
+  // Sync bin_id form value whenever resolved bin changes
+  useEffect(() => {
+    setValue('bin_id', resolvedBin ? resolvedBin.id : (0 as unknown as number))
+  }, [resolvedBin?.id])
+
   const handleModeChange = (newMode: PutawayMode) => {
     setMode(newMode)
+    setBinInput('')
     setValue('bin_id', 0 as unknown as number)
   }
 
   const mutation = useMutation({
     mutationFn: quantsApi.receiveGoods,
-    onSuccess: () => { setSuccess(true); reset() },
+    onSuccess: () => { setSuccess(true); reset(); setBinInput('') },
   })
+
+  const itemsLoaded = !!items
+  const itemNotFound = itemsLoaded && selectedSku && !selectedItem
 
   return (
     <div className="p-8 max-w-2xl">
@@ -113,13 +138,31 @@ export default function ReceiveGoods() {
 
           <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-5">
 
-            {/* Item — must be selected before mode matters */}
-            <Select label="Item SKU" id="item_sku" error={errors.item_sku?.message} {...register('item_sku')}>
-              <option value="">Select item…</option>
-              {items?.results.map((i) => (
-                <option key={i.sku} value={i.sku}>{i.sku} — {i.name}</option>
-              ))}
-            </Select>
+            {/* Item SKU — scan or type */}
+            <div className="space-y-1">
+              <div className="relative">
+                <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                <Input
+                  label="Item SKU"
+                  id="item_sku"
+                  placeholder="Scan barcode or type SKU…"
+                  className="pl-9"
+                  error={errors.item_sku?.message ?? (itemNotFound ? 'Item not found' : undefined)}
+                  {...register('item_sku')}
+                />
+              </div>
+              {selectedItem && (
+                <div className="flex items-center gap-2 rounded-lg bg-blue-50 border border-blue-100 px-3 py-1.5 text-sm text-blue-700">
+                  <Package className="h-3.5 w-3.5 shrink-0" />
+                  <span className="font-medium">{selectedItem.name}</span>
+                  {selectedItem.length_mm != null && (
+                    <span className="ml-auto text-xs text-blue-500">
+                      {selectedItem.length_mm}×{selectedItem.width_mm}×{selectedItem.height_mm} mm
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Putaway mode selector */}
             <div>
@@ -144,24 +187,65 @@ export default function ReceiveGoods() {
               </div>
             </div>
 
-            {/* Bin — filtered per mode */}
-            <Select label="Bin" id="bin_id" error={errors.bin_id?.message} {...register('bin_id')}>
-              <option value="">
-                {(mode === 'consolidate' || mode === 'fits') && !selectedItem
-                  ? 'Select an item first…'
-                  : 'Select bin…'}
-              </option>
-              {filteredBins.map((b: Bin) => (
-                <option key={b.id} value={b.id}>
-                  {b.location_code}
-                  {b.warehouse_code ? ` (${b.warehouse_code})` : ''}
-                  {mode === 'consolidate' && binQtyMap.has(b.id) ? ` · ${binQtyMap.get(b.id)} in stock` : ''}
-                  {mode === 'fits' && b.bin_volume_mm3 > 0 ? ` · ${b.remaining_volume_mm3.toLocaleString()} mm³ free` : ''}
-                </option>
-              ))}
-            </Select>
+            {/* Bin — scan barcode or type location code */}
+            <div className="space-y-1">
+              <div className="relative">
+                <ScanLine className="absolute left-3 bottom-2 h-4 w-4 text-slate-400 pointer-events-none" />
+                <Input
+                  label="Bin"
+                  id="bin_scan"
+                  value={binInput}
+                  onChange={(e) => setBinInput(e.target.value)}
+                  placeholder={
+                    (mode === 'consolidate' || mode === 'fits') && !selectedItem
+                      ? 'Select an item first…'
+                      : 'Scan barcode or type location code…'
+                  }
+                  className="pl-9"
+                  error={
+                    binInput.trim() && !resolvedBin
+                      ? 'Bin not found'
+                      : errors.bin_id?.message
+                  }
+                />
+              </div>
+              {/* hidden input keeps bin_id registered for form validation */}
+              <input type="hidden" {...register('bin_id')} />
 
-            {/* Helper hints */}
+              {resolvedBin && (
+                <div className={cn(
+                  'flex items-center gap-3 rounded-lg border px-3 py-2 text-sm',
+                  binMatchesMode || mode === 'manual'
+                    ? 'bg-green-50 border-green-200 text-green-700'
+                    : 'bg-amber-50 border-amber-200 text-amber-700'
+                )}>
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium">{resolvedBin.location_code}</span>
+                    {resolvedBin.warehouse_code && (
+                      <span className="ml-1.5 text-xs opacity-70">({resolvedBin.warehouse_code})</span>
+                    )}
+                    {mode === 'consolidate' && binQtyMap.has(resolvedBin.id) && (
+                      <span className="ml-2 text-xs">{binQtyMap.get(resolvedBin.id)} in stock</span>
+                    )}
+                    {mode === 'fits' && resolvedBin.bin_volume_mm3 > 0 && (
+                      <span className="ml-2 text-xs">{resolvedBin.remaining_volume_mm3.toLocaleString()} mm³ free</span>
+                    )}
+                  </div>
+                  {!binMatchesMode && mode !== 'manual' && (
+                    <span className="text-xs shrink-0">Not in {mode} filter</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setBinInput(''); setValue('bin_id', 0 as unknown as number) }}
+                    className="text-xs underline shrink-0"
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Mode hints */}
             {mode === 'consolidate' && selectedItem && filteredBins.length === 0 && (
               <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
                 No bins currently hold this item. Switch to <strong>Manual</strong> to choose any bin.
