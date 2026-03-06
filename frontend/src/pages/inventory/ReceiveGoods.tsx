@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { CheckCircle2 } from 'lucide-react'
@@ -8,6 +8,8 @@ import { quantsApi, binsApi, itemsApi, companiesApi, stockCategoriesApi } from '
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import { Input, Select, Textarea } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
+import { cn } from '@/lib/utils'
+import type { Bin, Quant } from '@/types'
 
 const schema = z.object({
   bin_id: z.coerce.number().min(1, 'Select a bin'),
@@ -20,22 +22,65 @@ const schema = z.object({
 })
 type FormData = z.infer<typeof schema>
 
+type PutawayMode = 'manual' | 'consolidate' | 'empty'
+
+const MODES: { value: PutawayMode; label: string; desc: string }[] = [
+  { value: 'manual',      label: 'Manual',      desc: 'All active bins' },
+  { value: 'consolidate', label: 'Consolidate', desc: 'Bins with this item' },
+  { value: 'empty',       label: 'Empty',       desc: 'Bins with no stock' },
+]
+
 export default function ReceiveGoods() {
   const [success, setSuccess] = useState(false)
+  const [mode, setMode] = useState<PutawayMode>('manual')
 
-  const { data: bins } = useQuery({ queryKey: ['bins-all'], queryFn: () => binsApi.list({ page_size: 500 }) })
-  const { data: items } = useQuery({ queryKey: ['items-all'], queryFn: () => itemsApi.list({ page_size: 500 }) })
-  const { data: companies } = useQuery({ queryKey: ['companies'], queryFn: () => companiesApi.list() })
-  const { data: cats } = useQuery({ queryKey: ['stock-cats'], queryFn: () => stockCategoriesApi.list() })
+  const { data: bins }      = useQuery({ queryKey: ['bins-all'],   queryFn: () => binsApi.list({ page_size: 500 }) })
+  const { data: items }     = useQuery({ queryKey: ['items-all'],  queryFn: () => itemsApi.list({ page_size: 500 }) })
+  const { data: companies } = useQuery({ queryKey: ['companies'],  queryFn: () => companiesApi.list() })
+  const { data: cats }      = useQuery({ queryKey: ['stock-cats'], queryFn: () => stockCategoriesApi.list() })
+
+  const { register, handleSubmit, reset, control, setValue, formState: { errors } } = useForm<FormData>({
+    resolver: zodResolver(schema),
+    defaultValues: { stock_category: 'UNRESTRICTED', qty: 1 },
+  })
+
+  const selectedSku  = useWatch({ control, name: 'item_sku' })
+  const selectedItem = items?.results.find((i) => i.sku === selectedSku)
+
+  const { data: itemQuants } = useQuery({
+    queryKey: ['quants-for-item', selectedItem?.id],
+    queryFn:  () => quantsApi.list({ item: selectedItem!.id, page_size: 1000 }),
+    enabled:  mode === 'consolidate' && !!selectedItem?.id,
+  })
+
+  // Build filtered bin list based on putaway mode
+  const activeBins = bins?.results.filter((b: Bin) => b.active) ?? []
+  const filteredBins = (() => {
+    if (mode === 'empty')       return activeBins.filter((b: Bin) => b.quants_count === 0)
+    if (mode === 'consolidate') {
+      if (!selectedItem) return []
+      const binIds = new Set(itemQuants?.results.map((q: Quant) => q.bin) ?? [])
+      return activeBins.filter((b: Bin) => binIds.has(b.id))
+    }
+    return activeBins
+  })()
+
+  // bin id → total available qty for this item (consolidate mode label)
+  const binQtyMap = new Map<number, number>()
+  if (mode === 'consolidate') {
+    for (const q of itemQuants?.results ?? []) {
+      binQtyMap.set(q.bin, (binQtyMap.get(q.bin) ?? 0) + q.qty_available)
+    }
+  }
+
+  const handleModeChange = (newMode: PutawayMode) => {
+    setMode(newMode)
+    setValue('bin_id', 0 as unknown as number)
+  }
 
   const mutation = useMutation({
     mutationFn: quantsApi.receiveGoods,
     onSuccess: () => { setSuccess(true); reset() },
-  })
-
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<FormData>({
-    resolver: zodResolver(schema),
-    defaultValues: { stock_category: 'UNRESTRICTED', qty: 1 },
   })
 
   return (
@@ -57,21 +102,63 @@ export default function ReceiveGoods() {
           )}
 
           <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-5">
-            <div className="grid grid-cols-2 gap-4">
-              <Select label="Bin" id="bin_id" error={errors.bin_id?.message} {...register('bin_id')}>
-                <option value="">Select bin…</option>
-                {bins?.results.map((b) => (
-                  <option key={b.id} value={b.id}>{b.location_code}</option>
-                ))}
-              </Select>
 
-              <Select label="Item SKU" id="item_sku" error={errors.item_sku?.message} {...register('item_sku')}>
-                <option value="">Select item…</option>
-                {items?.results.map((i) => (
-                  <option key={i.sku} value={i.sku}>{i.sku} — {i.name}</option>
+            {/* Item — must be selected before mode matters */}
+            <Select label="Item SKU" id="item_sku" error={errors.item_sku?.message} {...register('item_sku')}>
+              <option value="">Select item…</option>
+              {items?.results.map((i) => (
+                <option key={i.sku} value={i.sku}>{i.sku} — {i.name}</option>
+              ))}
+            </Select>
+
+            {/* Putaway mode selector */}
+            <div>
+              <p className="mb-1.5 text-sm font-medium text-slate-700">Putaway Mode</p>
+              <div className="flex gap-2">
+                {MODES.map((m) => (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => handleModeChange(m.value)}
+                    className={cn(
+                      'flex-1 rounded-lg border px-3 py-2 text-left text-sm transition-colors',
+                      mode === m.value
+                        ? 'border-primary-500 bg-primary-50 text-primary-700'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                    )}
+                  >
+                    <p className="font-medium">{m.label}</p>
+                    <p className="text-xs opacity-70">{m.desc}</p>
+                  </button>
                 ))}
-              </Select>
+              </div>
             </div>
+
+            {/* Bin — filtered per mode */}
+            <Select label="Bin" id="bin_id" error={errors.bin_id?.message} {...register('bin_id')}>
+              <option value="">
+                {mode === 'consolidate' && !selectedItem ? 'Select an item first…' : 'Select bin…'}
+              </option>
+              {filteredBins.map((b: Bin) => (
+                <option key={b.id} value={b.id}>
+                  {b.location_code}
+                  {b.warehouse_code ? ` (${b.warehouse_code})` : ''}
+                  {mode === 'consolidate' && binQtyMap.has(b.id) ? ` · ${binQtyMap.get(b.id)} in stock` : ''}
+                </option>
+              ))}
+            </Select>
+
+            {/* Helper hints */}
+            {mode === 'consolidate' && selectedItem && filteredBins.length === 0 && (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                No bins currently hold this item. Switch to <strong>Manual</strong> to choose any bin.
+              </p>
+            )}
+            {mode === 'empty' && filteredBins.length === 0 && (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                No empty bins available.
+              </p>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <Input label="Quantity" id="qty" type="number" error={errors.qty?.message} {...register('qty')} />
